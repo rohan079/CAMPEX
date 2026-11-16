@@ -107,8 +107,12 @@ class TelephonyService:
     ) -> str:
         """Place an Edesy call and return its outbound call_sid, not an answered-call claim."""
         settings = self._settings
-        if not settings.telephony_configured or settings.call_provider.lower() != "edesy":
-            raise TelephonyConfigurationError("Edesy call settings are incomplete")
+        if (
+            not settings.telephony_configured
+            or not settings.speech_backend_configured
+            or settings.call_provider.lower() != "edesy"
+        ):
+            raise TelephonyConfigurationError("Edesy call or selected speech-engine settings are incomplete")
 
         payload = {
             "from": settings.edesy_from_number,

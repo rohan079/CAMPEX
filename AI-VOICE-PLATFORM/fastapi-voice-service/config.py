@@ -16,12 +16,20 @@ class Settings(BaseSettings):
     # The legacy provider remains available until the Edesy/HF path is accepted.
     call_provider: Literal["openai_sip", "edesy"] = "openai_sip"
 
+    # Speech engine used by Edesy media calls; independent from the SIP/CPaaS call provider.
+    speech_engine: Literal["hf", "openai_realtime"] = "hf"
+
     # OpenAI Live (default provider-managed calling)
     openai_api_key: str = ""
     openai_live_model: str = "gpt-live-1"
     openai_voice: str = "marin"
     openai_live_url: str = "https://api.openai.com/v1/live/sessions"
     openai_live_ws_url: str = "wss://api.openai.com/v1/live/sessions"
+    openai_realtime_ws_url: str = "wss://api.openai.com/v1/realtime"
+    openai_realtime_model: str = "gpt-realtime-2.1"
+    openai_realtime_voice: str = "marin"
+    openai_realtime_transcription_model: str = "gpt-4o-transcribe"
+    openai_realtime_connect_timeout_seconds: float = 15
 
     # SIP trunk used by OpenAI Live
     sip_provider_url: str = ""
@@ -94,6 +102,9 @@ class Settings(BaseSettings):
 
     @property
     def speech_backend_configured(self) -> bool:
+        if self.speech_engine == "openai_realtime":
+            url = urlsplit(self.openai_realtime_ws_url)
+            return bool(self.openai_api_key) and url.scheme == "wss" and bool(url.netloc)
         return urlsplit(self.hf_speech_ws_url).scheme in {"ws", "wss"} and bool(urlsplit(self.hf_speech_ws_url).netloc)
 
     @property

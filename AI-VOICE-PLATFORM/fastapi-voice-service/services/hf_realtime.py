@@ -5,6 +5,8 @@ from __future__ import annotations
 import base64
 import json
 import asyncio
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from typing import Any
 
 import websockets
@@ -150,3 +152,43 @@ async def generate_summary(settings: Settings, transcript: str) -> str:
 async def send_json(socket: Any, event: dict[str, Any], lock: Any) -> None:
     async with lock:
         await socket.send(json.dumps(event, separators=(",", ":")))
+
+
+class HFRealtimeSpeechEngine:
+    def __init__(self, settings: Settings):
+        self._settings = settings
+
+    @asynccontextmanager
+    async def open_session(
+        self, instructions: str, greeting: str, language: str
+    ) -> AsyncIterator[Any]:
+        del language
+        async with await connect(self._settings) as socket:
+            try:
+                created = json.loads(await asyncio.wait_for(socket.recv(), timeout=10))
+            except (TimeoutError, json.JSONDecodeError) as exc:
+                raise RuntimeError("HF Realtime session did not initialize") from exc
+            if created.get("type") != "session.created":
+                raise RuntimeError("HF Realtime did not send session.created first")
+
+            lock = asyncio.Lock()
+            await send_json(socket, session_update(instructions), lock)
+            greeting_item, greeting_response = initial_greeting(greeting)
+            await send_json(socket, greeting_item, lock)
+            await send_json(socket, greeting_response, lock)
+            yield socket
+
+    async def send_audio(self, socket: Any, pcm16le: bytes, lock: Any) -> None:
+        await send_json(socket, append_audio(pcm16le), lock)
+
+    def audio_delta(self, event: dict[str, Any]) -> bytes:
+        return audio_delta(event)
+
+    def finish_output_audio(self) -> bytes:
+        return b""
+
+    def discard_output_audio(self) -> None:
+        return None
+
+    async def generate_summary(self, transcript: str) -> str:
+        return await generate_summary(self._settings, transcript)

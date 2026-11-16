@@ -7,8 +7,9 @@ A WhatsApp-to-phone lead agent, split into two services:
 - **`fastapi-voice-service`** (Python, FastAPI) — owns the Edesy Calls API, Edesy media WebSocket adapter,
   English/Telugu call prompts, opt-out detection, and Spring status/summary callbacks. The legacy OpenAI/SIP
   provider remains selectable with `CALL_PROVIDER=openai_sip`.
-- **Hugging Face speech-to-speech** — optional, separate local-model service. The Edesy path connects to its
-  OpenAI-Realtime-compatible WebSocket over the private Compose network; no OpenAI API key is used by that path.
+- **Speech engine** — independently selectable for Edesy calls: local Hugging Face (`SPEECH_ENGINE=hf`, default)
+  or OpenAI Realtime (`SPEECH_ENGINE=openai_realtime`). The OpenAI speech engine does not replace Edesy call
+  control and does not use OpenAI SIP.
 - **`dashboard`** — the Campex React UI: per-client marketing graphs (leads, ad sales, calling-agent sales, ad reach by
   location), plus the campaign studio, lead-review queue and channel setup. It only talks to the lead
   service; the lead service proxies AI copy requests to FastAPI.
@@ -17,12 +18,13 @@ A WhatsApp-to-phone lead agent, split into two services:
  Meta WhatsApp ──webhook──▶ ┌─────────────────────────┐  POST /api/calls          ┌─────────────────────────┐
  Ad popup ──POST /api/ad-leads▶ │ Spring Boot lead service │ ────────────────────────▶ │ FastAPI voice service   │──▶ Edesy Calls API ──▶ PSTN
  Dashboard ──/api/*──────▶ │ leads · consent · calls │ ◀── POST /internal/        │ Edesy media adapter     │◀── 16 kHz L16 WebSocket
-                           │ scheduler · WhatsApp   │      call-events/summary  │ local HF S2S client     │
+                           │ scheduler · WhatsApp   │      call-events/summary  │ selected speech engine  │
                            └───────────┬────────────┘                          └───────────┬─────────────┘
-                                       │                                              private WS
+                                       │                                              private or WSS
                                   ┌────▼────┐                                  ┌──────────▼───────────┐
-                                  │Postgres │                                  │HF S2S + Indic TTS    │
-                                  └─────────┘                                  └──────────────────────┘
+                                  │Postgres │                                  │HF S2S or OpenAI      │
+                                  └─────────┘                                  │Realtime speech       │
+                                                                               └──────────────────────┘
 ```
 
 ## Layout
@@ -43,7 +45,8 @@ AI-VOICE-PLATFORM/
 │   └── src/main/resources/db/migration/    V1__init.sql, V2__clients_sales_reach.sql  ← the schema (Flyway)
 ├── fastapi-voice-service/
 │   ├── api/              call_controller.py, edesy_webhook.py, media_edesy.py
-│   ├── services/         hf_realtime.py, telephony_service.py, conversation_service.py, lead_client.py
+│   ├── services/         hf_realtime.py, openai_realtime_speech.py, telephony_service.py,
+│   │                     conversation_service.py, lead_client.py
 │   ├── prompts/          English and Telugu agent/greeting templates (.txt)
 │   └── main.py
 ├── dashboard/            React + Vite + Recharts UI
@@ -74,9 +77,9 @@ AI-VOICE-PLATFORM/
 3. **Dispatch** — it `POST`s `/api/calls` to the voice service with the number, language, name and ad details.
    With `CALL_PROVIDER=edesy`, FastAPI calls Edesy's `/v1/calls` with a stream URL and returns Edesy's outbound SID.
 4. **Audio** — Edesy opens `/media/edesy`, sends a JSON metadata frame, then bidirectional binary L16 PCM.
-   FastAPI adapts that media to the private HF Realtime WebSocket and streams the generated audio back.
+   FastAPI bridges audio to the selected HF or OpenAI Realtime speech engine and streams generated audio back.
 5. **Events and summary** — Edesy's signed callback reports ringing/answer/end/failure; FastAPI forwards normalized
-   statuses to `POST /internal/call-events` and a local transcript-grounded summary to
+   statuses to `POST /internal/call-events` and a transcript-grounded summary from the selected speech engine to
    `POST /internal/call-summaries`.
 6. **Opt-out on the call** — if the caller says they are not interested, the voice service hangs up, reports
    `not_interested`, and the lead service **deletes the lead**. The same happens if they say so on WhatsApp
@@ -197,6 +200,11 @@ launcher does not delete or prune the upstream `speech-to-speech/` checkout.
   owned by this deployment**, such as `wss://voice.example.com/media/edesy`; `voice-api.edesy.in` is Edesy's API
   host, not the agent media endpoint. Configure the HTTPS status callback at
   `https://voice.example.com/webhooks/edesy/status` and terminate TLS at a reverse proxy that supports WebSockets.
+- To use OpenAI speech-to-speech while retaining Edesy for call placement, set `SPEECH_ENGINE=openai_realtime`,
+  `OPENAI_API_KEY`, `OPENAI_REALTIME_MODEL` (default `gpt-realtime-2.1`), and `OPENAI_REALTIME_VOICE` (default
+  `marin`). The HF engine remains the default. The API key stays server-side; the health endpoint reports the
+  selected speech engine and whether its configuration is present. Calls are rejected before dialing if the
+  selected engine is not configured.
 - Request/accept access to `ai4bharat/indic-parler-tts` and review its current model terms before setting `HF_TOKEN`
   in `hf-model.env`. The TTS service and HF server are not published on host ports. This gated model is used because
   Qwen3-TTS does not list Telugu among its supported languages.
@@ -217,14 +225,18 @@ launcher does not delete or prune the upstream `speech-to-speech/` checkout.
 
 - **Edesy → FastAPI:** first WebSocket message is JSON call metadata; audio is binary L16/PCM, signed 16-bit
   little-endian, mono, 16 kHz. Edesy documents frames of about 640 bytes (20 ms).
-- **FastAPI → Hugging Face:** the same PCM bytes are base64-encoded into HF's
-  `input_audio_buffer.append` WebSocket event. No SIP/RTP codec conversion is involved.
+- **FastAPI → Hugging Face:** with `SPEECH_ENGINE=hf`, the same PCM bytes are base64-encoded into HF's
+  `input_audio_buffer.append` event. No sample-rate conversion is involved.
+- **FastAPI → OpenAI Realtime:** with `SPEECH_ENGINE=openai_realtime`, stateful SoXR resamplers convert input PCM16LE
+  from 16 kHz mono to 24 kHz mono and output PCM16LE from 24 kHz mono back to 16 kHz mono. Each side is base64
+  encoded in Realtime WebSocket events. OpenAI server VAD handles turn detection and response interruption; input
+  transcription is enabled for the call language. SIP signalling and RTP are not handled by this media adapter.
 - **Hugging Face → FastAPI:** `response.output_audio.delta` carries base64 PCM. The local Indic Parler adapter
   emits raw PCM16 at 24 kHz; the HF S2S OpenAI-compatible TTS adapter resamples it to the pipeline's native
   16 kHz before returning Realtime audio.
-- **FastAPI → Edesy:** decode the HF audio delta and send binary PCM16LE mono at 16 kHz, in 640-byte frames
-  paced at 20 ms. On HF `input_audio_buffer.speech_started`, send Edesy `{"type":"killAudio"}` and flush queued
-  playback. On hangup/opt-out, send `{"type":"disconnect"}`.
+- **FastAPI → Edesy:** send binary PCM16LE mono at 16 kHz, in 640-byte frames paced at 20 ms. On the selected
+  engine's `input_audio_buffer.speech_started`, send Edesy `{"type":"killAudio"}` and flush queued playback.
+  On hangup/opt-out, send `{"type":"disconnect"}`.
 - The Indic Parler endpoint synthesizes each segment before returning it; pacing the bytes does not make model
   inference incremental. The actual first-audio latency and Telugu quality must be measured on the target GPU.
 
@@ -265,10 +277,12 @@ Lead service (`springboot-lead-service/src/main/resources/application.properties
 | `ENVIRONMENT` | Anything other than `development` makes missing keys a hard `503` instead of "open" |
 
 Voice service (`fastapi-voice-service/.env.example`): `CALL_PROVIDER=edesy` (legacy `openai_sip` remains available),
-`EDESY_API_BASE_URL`, `EDESY_API_KEY`, `EDESY_FROM_NUMBER`, `EDESY_MEDIA_WS_URL`, `EDESY_STREAM_TOKEN`,
-`EDESY_STATUS_CALLBACK_URL`, `EDESY_WEBHOOK_SECRET`, `HF_SPEECH_WS_URL`, `MAX_CONCURRENT_CALLS`,
-`LEAD_SERVICE_URL`, and `INTERNAL_SERVICE_KEY`. OpenAI/SIP and ElevenLabs settings are legacy/preview only.
-`VOICE_MAX_CONCURRENT_CALLS` on Spring must not exceed the active HF pipeline count.
+`SPEECH_ENGINE=hf|openai_realtime`, Edesy settings, and `MAX_CONCURRENT_CALLS`. HF mode uses `HF_SPEECH_WS_URL`;
+OpenAI Realtime mode uses `OPENAI_API_KEY`, `OPENAI_REALTIME_WS_URL`, `OPENAI_REALTIME_MODEL`,
+`OPENAI_REALTIME_VOICE`, and `OPENAI_REALTIME_TRANSCRIPTION_MODEL`. `LEAD_SERVICE_URL` and
+`INTERNAL_SERVICE_KEY` are also required for service integration. OpenAI Realtime speech is independent of the
+legacy OpenAI SIP settings; ElevenLabs remains preview-only. `VOICE_MAX_CONCURRENT_CALLS` on Spring must not exceed
+the available capacity of the selected speech engine.
 `hf-model.env` separately holds the gated Hugging Face token and GPU settings; do not copy it into the public voice
 service environment or commit its real values.
 

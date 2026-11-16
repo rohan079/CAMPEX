@@ -59,6 +59,7 @@ class ActiveCall:
     call_id: str
     session_id: str
     greeting: str
+    language: str = "en"
     instructions: str = ""
     destination: str = ""
     pending_line: str | None = None
@@ -128,6 +129,7 @@ class ConversationService:
                 call_id=request.call_id,
                 session_id=session_id,
                 greeting=greeting,
+                language=request.language,
                 instructions=instructions,
                 destination=request.destination,
             )
@@ -145,6 +147,7 @@ class ConversationService:
             call_id=request.call_id,
             session_id=f"pending:{request.call_id}",
             greeting=greeting,
+            language=request.language,
             instructions=instructions,
             destination=request.destination,
             pending_line=line_key,

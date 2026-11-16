@@ -14,6 +14,7 @@ class FakeActiveCall:
     session_id = "outbound-sid-1"
     instructions = "Speak naturally in Telugu. Do not invent property facts."
     greeting = "Hello, I am an AI assistant."
+    language = "te"
     media_attached = False
     terminal = False
 

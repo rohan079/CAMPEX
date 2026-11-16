@@ -70,6 +70,19 @@ async def test_posts_edesy_stream_call_and_returns_outbound_call_sid():
     assert "919800000001" in seen["body"]
 
 
+async def test_edesy_does_not_place_call_when_selected_openai_engine_is_unconfigured():
+    def unexpected_request(request):
+        raise AssertionError("call must not be placed without the selected speech engine")
+
+    settings = EDESY_CONFIGURED.model_copy(
+        update={"speech_engine": "openai_realtime", "openai_api_key": ""}
+    )
+    with pytest.raises(TelephonyConfigurationError):
+        await service(unexpected_request, settings).create_outbound_edesy_call(
+            "+919800000001", call_id="call-1", lead_id="lead-1"
+        )
+
+
 async def test_edesy_hangup_uses_delete_and_treats_already_ended_as_success():
     seen = []
 

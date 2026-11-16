@@ -43,6 +43,7 @@ async def health() -> dict:
         "service": "voice-service",
         "environment": settings.environment,
         "call_provider": settings.call_provider,
+        "speech_engine": settings.speech_engine,
         "telephony_configured": settings.telephony_configured,
         "speech_backend_configured": settings.speech_backend_configured,
         "campaign_ai_configured": settings.ai_configured,
