@@ -20,6 +20,7 @@ import type {
 } from "./types";
 
 const dashboardKey = import.meta.env.VITE_DASHBOARD_API_KEY;
+const leadServiceUrl = (import.meta.env.LEAD_SERVICE_URL || "").replace(/\/+$/, "");
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers);
@@ -27,9 +28,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   if (init?.body) headers.set("Content-Type", "application/json");
   let response: Response;
   try {
-    response = await fetch(path, { ...init, headers });
+    const endpoint = path.startsWith("/") ? path : `/${path}`;
+    response = await fetch(`${leadServiceUrl}${endpoint}`, { ...init, headers });
   } catch {
-    throw new Error("Cannot reach the API. Start the lead service on port 8080, then refresh.");
+    throw new Error("Cannot reach the API. Check LEAD_SERVICE_URL and the lead service, then refresh.");
   }
   if (!response.ok) {
     let message = response.statusText;

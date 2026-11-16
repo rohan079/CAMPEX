@@ -1,12 +1,33 @@
+# Environment secrets; keep checked-in templates such as .env.example.
 .env
+.env.*
+!.env.example
+!.env.*.example
+infrastructure/*.env
+springboot-lead-service/local.properties
+
+# Python
 .venv/
+venv/
 __pycache__/
+*.py[cod]
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Java / Maven
 target/
+
+# Node / Vite
 node_modules/
-dashboard/dist/
-dashboard/.env
+dist/
+coverage/
+.vite/
+
+# IDE, OS, and local run artifacts
 .idea/
 .DS_Store
 .run-local/
-infrastructure/*.env
+*.log

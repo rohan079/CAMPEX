@@ -266,7 +266,7 @@ Lead service (`springboot-lead-service/src/main/resources/application.properties
 
 | Variable | Meaning |
 | --- | --- |
-| `DATABASE_URL` / `DATABASE_USER` / `DATABASE_PASSWORD` | PostgreSQL JDBC URL and separate credentials. The URL must start with `jdbc:postgresql://`; do not place `user:password@` in the URL. For Render, use its hostname and database name to form `jdbc:postgresql://<host>:5432/<database>?sslmode=require`, then set username/password separately. |
+| `DATABASE_URL` / `DATABASE_USER` / `DATABASE_PASSWORD` | PostgreSQL JDBC URL and separate credentials. The URL must start with `jdbc:postgresql://`; do not place `user:password@` in the URL. For Render, use its hostname and database name to form `jdbc:postgresql://<host>:5432/<database>?sslmode=require`, then set username/password separately. For Railway, see the service-variable setup below. |
 | `BUSINESS_NAME`, `BUSINESS_DESCRIPTION` | Used in WhatsApp messages and sent to the voice service for prompts |
 | `BUSINESS_TIMEZONE` (`Asia/Kolkata`), `FOLLOW_UP_CALL_DAYS` (`7`) | "Tomorrow" and the one-call-per-day rule use this timezone |
 | `META_VERIFY_TOKEN`, `META_APP_SECRET`, `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_GRAPH_API_VERSION` | Meta |
@@ -275,6 +275,62 @@ Lead service (`springboot-lead-service/src/main/resources/application.properties
 | `VOICE_SERVICE_URL`, `VOICE_SERVICE_TIMEOUT_SECONDS` | Where the voice service is |
 | `APP_CURRENCY` (`INR`) | Currency code shown for sales and revenue |
 | `ENVIRONMENT` | Anything other than `development` makes missing keys a hard `503` instead of "open" |
+
+### Railway variables for the Spring lead service
+
+The source root is `/AI-VOICE-PLATFORM/springboot-lead-service` when the GitHub repository root is the parent of
+`AI-VOICE-PLATFORM`; otherwise use `/springboot-lead-service`. The directory contains a [Dockerfile](./springboot-lead-service/Dockerfile).
+Set runtime values in the Spring service's **Variables** tab, not in the Dockerfile. Railway injects `PORT`; the app
+already binds to it.
+
+After adding a Railway PostgreSQL service, set the Spring service variables below. Replace `Postgres` and
+`voice-service` with the exact service names in your Railway project:
+
+```dotenv
+ENVIRONMENT=production
+DATABASE_URL=jdbc:postgresql://${{Postgres.PGHOST}}:${{Postgres.PGPORT}}/${{Postgres.PGDATABASE}}
+DATABASE_USER=${{Postgres.PGUSER}}
+DATABASE_PASSWORD=${{Postgres.PGPASSWORD}}
+BUSINESS_NAME=Campex
+BUSINESS_DESCRIPTION=Describe the business and its offering
+BUSINESS_TIMEZONE=Asia/Kolkata
+FOLLOW_UP_CALL_DAYS=7
+CALL_POLL_SECONDS=3
+VOICE_MAX_CONCURRENT_CALLS=1
+VOICE_SERVICE_URL=http://${{voice-service.RAILWAY_PRIVATE_DOMAIN}}:8000
+VOICE_SERVICE_TIMEOUT_SECONDS=30
+INTERNAL_SERVICE_KEY=use-the-same-random-secret-on-the-voice-service
+META_VERIFY_TOKEN=your-meta-webhook-verify-token
+META_APP_SECRET=your-meta-app-secret
+WHATSAPP_ACCESS_TOKEN=your-meta-system-user-token
+WHATSAPP_PHONE_NUMBER_ID=your-meta-phone-number-id
+WHATSAPP_GRAPH_API_VERSION=your-supported-graph-api-version
+AD_POPUP_TOKEN=use-a-separate-random-secret
+DASHBOARD_API_KEY=use-a-separate-random-secret
+CORS_ORIGINS=https://your-app.vercel.app
+```
+
+Railway's PostgreSQL `DATABASE_URL` is a `postgresql://` URI; this Spring app requires a JDBC URL, so construct it
+from the PostgreSQL service's `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`, and `PGPASSWORD` references as shown.
+Keep the generated secrets only in Railway Variables. The `INTERNAL_SERVICE_KEY` must match on both Spring and
+FastAPI; configure `VOICE_SERVICE_URL` to the reachable FastAPI service. The checked-in
+[lead-service env template](./infrastructure/lead-service.env.example) is for local/Docker setup, not a secret store.
+
+For the FastAPI Railway service, set `LEAD_SERVICE_URL=http://${{lead-service.RAILWAY_PRIVATE_DOMAIN}}:8080` and
+the same `INTERNAL_SERVICE_KEY`. Replace `lead-service` and `voice-service` in Railway references with the exact
+service names you use.
+
+For a Vercel-hosted dashboard, set `LEAD_SERVICE_URL` in the Vercel project to the **public HTTPS origin** of the
+Spring lead service (for example, `https://your-lead-service.up.railway.app`), with no `/api` suffix or trailing
+slash. Do not use the FastAPI URL or a Railway private domain in Vercel: the browser calls Spring directly. Set
+Railway `CORS_ORIGINS` to the exact Vercel origin (for example, `https://your-app.vercel.app`); add a custom Vercel
+domain or each preview origin if it also needs access. If using dashboard key checks, set Vercel
+`VITE_DASHBOARD_API_KEY` equal to Spring `DASHBOARD_API_KEY`. Vite embeds `LEAD_SERVICE_URL` and `VITE_*` values in
+browser code, so the dashboard key is not a server-side secret. Redeploy Vercel after changing its environment
+variables. FastAPI has its own `LEAD_SERVICE_URL` variable, which should point privately to Spring, for example:
+`http://${{lead-service.RAILWAY_PRIVATE_DOMAIN}}:8080`. The
+[dashboard env template](./dashboard/.env.example) and [voice-service env template](./infrastructure/voice-service.env.example)
+list their remaining settings.
 
 Voice service (`fastapi-voice-service/.env.example`): `CALL_PROVIDER=edesy` (legacy `openai_sip` remains available),
 `SPEECH_ENGINE=hf|openai_realtime`, Edesy settings, and `MAX_CONCURRENT_CALLS`. HF mode uses `HF_SPEECH_WS_URL`;
