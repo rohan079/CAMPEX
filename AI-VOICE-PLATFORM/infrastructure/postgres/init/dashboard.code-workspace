@@ -1,0 +1,13 @@
+{
+	"folders": [
+		{
+			"path": "../../../dashboard"
+		},
+		{
+			"path": "../../../fastapi-voice-service"
+		},
+		{
+			"path": "../.."
+		}
+	]
+}

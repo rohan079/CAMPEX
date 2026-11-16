@@ -1,0 +1,1 @@
+The call is about this ad. Ad headline: {ad_headline}. Ad details: {ad_body}. Discuss only these ad details, and if the customer says they are not interested, acknowledge and end the call.

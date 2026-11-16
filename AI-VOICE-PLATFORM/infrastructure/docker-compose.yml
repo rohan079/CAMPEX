@@ -1,0 +1,95 @@
+name: ai-voice-platform
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: voiceleads
+      POSTGRES_USER: ${POSTGRES_USER:-voice}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-voicepass}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-voice} -d voiceleads"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Owns leads, consent, WhatsApp, the follow-up schedule and the database schema (Flyway).
+  lead-service:
+    build: ../springboot-lead-service
+    env_file: lead-service.env
+    environment:
+      DATABASE_URL: jdbc:postgresql://postgres:5432/voiceleads
+      DATABASE_USER: ${POSTGRES_USER:-voice}
+      DATABASE_PASSWORD: ${POSTGRES_PASSWORD:-voicepass}
+      VOICE_SERVICE_URL: http://voice-service:8000
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+
+  # Owns lead-facing call orchestration and the Edesy/HF media adapter. Has no database.
+  voice-service:
+    build: ../fastapi-voice-service
+    env_file: voice-service.env
+    environment:
+      LEAD_SERVICE_URL: http://lead-service:8080
+    ports:
+      - "8000:8000"
+
+  # Optional local-model profile. Run with: docker compose --profile hf up --build
+  # Model services are private to this Compose network; no inference port is published.
+  indic-tts:
+    profiles: ["hf"]
+    build: ./indic-tts
+    env_file: hf-model.env
+    environment:
+      HF_HOME: /models/hf
+      INDIC_TTS_MODEL: ai4bharat/indic-parler-tts
+      INDIC_TTS_TARGET_SAMPLE_RATE: "24000"
+    volumes:
+      - hfmodelcache:/models/hf
+    gpus: all
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8091/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 10m
+
+  hf-speech-service:
+    profiles: ["hf"]
+    build: ./hf-speech-to-speech
+    env_file: hf-model.env
+    environment:
+      HF_HOME: /models/hf
+    volumes:
+      - hfmodelcache:/models/hf
+    gpus: all
+    depends_on:
+      indic-tts:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8765/v1/realtime/capabilities', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 15m
+
+  dashboard:
+    build: ../dashboard
+    environment:
+      API_PROXY_TARGET: http://lead-service:8080
+    depends_on:
+      - lead-service
+    ports:
+      - "5173:5173"
+
+volumes:
+  pgdata:
+  hfmodelcache:

@@ -1,0 +1,155 @@
+package com.aivoice.lead.dto;
+
+import com.fasterxml.jackson.annotation.JsonInclude;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotEmpty;
+import jakarta.validation.constraints.Pattern;
+import jakarta.validation.constraints.Size;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.util.List;
+import java.util.Map;
+
+/** Wire shapes. Jackson renders these as snake_case, which the dashboard and voice service expect. */
+public final class Dtos {
+
+    private Dtos() {
+    }
+
+    public record LatestCallDto(String id, String status, String language, String outcome, Instant startedAt) {
+    }
+
+    public record CallDto(
+            String id,
+            String leadId,
+            String leadName,
+            String phoneNumber,
+            String status,
+            String language,
+            String outcome,
+            String summary,
+            int attempts,
+            String openaiSessionId,
+            Instant startedAt,
+            Instant endedAt,
+            Instant createdAt) {
+    }
+
+    public record LeadDto(
+            String id,
+            String clientId,
+            String phoneNumber,
+            String firstName,
+            String status,
+            String reviewStatus,
+            String preferredLanguage,
+            String campaignId,
+            String adId,
+            String adHeadline,
+            String adBody,
+            String source,
+            Instant outreachSentAt,
+            Instant repliedAt,
+            LocalDate followUpStart,
+            LocalDate followUpEnd,
+            String initialMessage,
+            Instant createdAt,
+            Instant updatedAt,
+            LatestCallDto latestCall,
+            @JsonInclude(JsonInclude.Include.NON_NULL) List<CallDto> calls,
+            @JsonInclude(JsonInclude.Include.NON_NULL) Boolean languageLocked) {
+    }
+
+    public record LeadPage(List<LeadDto> leads, long total, int limit, long offset) {
+    }
+
+    public record LeadReviewStats(long pending, long accepted, long rejected) {
+    }
+
+    public record CallPage(List<CallDto> calls, long total, int limit, long offset) {
+    }
+
+    public record LanguageDto(String code, String label, String nativeName) {
+    }
+
+    public record LeadStats(long total, Map<String, Long> byStatus, Map<String, Long> byLanguage) {
+    }
+
+    public record CallStats(long total, Map<String, Long> byStatus) {
+    }
+
+    public record DashboardDto(
+            String businessName,
+            List<LanguageDto> languages,
+            LeadStats leads,
+            CallStats calls,
+            List<LeadDto> recentLeads,
+            List<CallDto> recentCalls) {
+    }
+
+    public record LanguageUpdate(@NotBlank @Size(max = 8) String language) {
+    }
+
+    public record LeadReviewUpdate(@NotBlank @Pattern(regexp = "pending|accepted|rejected") String reviewStatus) {
+    }
+
+    public record AdLeadRequest(
+            @NotBlank @Size(min = 8, max = 24) String phoneNumber,
+            @Size(max = 120) String name,
+            @Size(max = 128) String adId,
+            @Size(max = 128) String campaignId,
+            @Size(max = 300) String adHeadline,
+            @Size(max = 2000) String adBody,
+            @Size(max = 8) String language,
+            @Size(max = 80) String client) {
+    }
+
+    public record AdLeadResponse(String id, String status, String phoneNumber,
+                                 LocalDate followUpStart, LocalDate followUpEnd) {
+    }
+
+    /** What the voice service tells us about a call. */
+    public record CallEventRequest(
+            @NotBlank String callId,
+            String sessionId,
+            @NotBlank String type,
+            String detail,
+            String eventId) {
+    }
+
+    /** Concise locally generated summary; the raw audio transcript is not persisted by default. */
+    public record CallSummaryRequest(
+            @NotBlank String callId,
+            @NotBlank @Size(max = 10000) String summary) {
+    }
+
+    public record CampaignAssistRequest(
+            @NotBlank @Size(max = 160) String campaignName,
+            @NotBlank @Pattern(regexp = "leads|traffic|sales|awareness") String objective,
+            @NotEmpty @Size(max = 5) List<@Pattern(regexp = "facebook|instagram|whatsapp_business|google_ads|whatsapp_ads") String> platforms,
+            @NotBlank @Pattern(regexp = "en|te") String language,
+            @NotBlank @Size(max = 2000) String prompt,
+            @NotBlank @Size(max = 5000) String content) {
+    }
+
+    public record CampaignAssistResponse(String reply, String provider, String model) {
+    }
+
+    /** What we ask the voice service to start. */
+    public record StartCallRequest(
+            String callId,
+            String leadId,
+            String destination,
+            String language,
+            String firstName,
+            String businessName,
+            String businessDescription,
+            String adHeadline,
+            String adBody,
+            boolean followUp,
+            @Size(max = 12000) String knowledgeBase) {
+    }
+
+    public record StartCallResponse(String sessionId, String status) {
+    }
+}
