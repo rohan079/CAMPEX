@@ -307,7 +307,7 @@ WHATSAPP_PHONE_NUMBER_ID=your-meta-phone-number-id
 WHATSAPP_GRAPH_API_VERSION=your-supported-graph-api-version
 AD_POPUP_TOKEN=use-a-separate-random-secret
 DASHBOARD_API_KEY=use-a-separate-random-secret
-CORS_ORIGINS=https://your-app.vercel.app
+CORS_ORIGINS=https://campexdashboard.vercel.app
 ```
 
 Railway's PostgreSQL `DATABASE_URL` is a `postgresql://` URI; this Spring app requires a JDBC URL, so construct it
@@ -320,13 +320,14 @@ For the FastAPI Railway service, set `LEAD_SERVICE_URL=http://${{lead-service.RA
 the same `INTERNAL_SERVICE_KEY`. Replace `lead-service` and `voice-service` in Railway references with the exact
 service names you use.
 
-For a Vercel-hosted dashboard, set `LEAD_SERVICE_URL` in the Vercel project to the **public HTTPS origin** of the
-Spring lead service (for example, `https://your-lead-service.up.railway.app`), with no `/api` suffix or trailing
-slash. Do not use the FastAPI URL or a Railway private domain in Vercel: the browser calls Spring directly. Set
-Railway `CORS_ORIGINS` to the exact Vercel origin (for example, `https://your-app.vercel.app`); add a custom Vercel
-domain or each preview origin if it also needs access. If using dashboard key checks, set Vercel
-`VITE_DASHBOARD_API_KEY` equal to Spring `DASHBOARD_API_KEY`. Vite embeds `LEAD_SERVICE_URL` and `VITE_*` values in
-browser code, so the dashboard key is not a server-side secret. Redeploy Vercel after changing its environment
+For a Vercel-hosted dashboard, set `LEAD_SERVICE_URL=https://campex-production.up.railway.app` in the Vercel
+project. Include the `https://` scheme and set only the backend origin—no `/api` suffix or trailing slash. Do not
+use the FastAPI URL or a Railway private domain in Vercel: the browser calls Spring directly. Set Railway
+`CORS_ORIGINS=https://campexdashboard.vercel.app`; add a custom Vercel domain or each preview origin
+(`https://campexdashboard-orv74pw16-rohan079s-projects.vercel.app` for the current preview) if it also needs access.
+If using dashboard key checks, set Vercel `DASHBOARD_API_KEY` equal to Spring `DASHBOARD_API_KEY`. Vite explicitly
+embeds this variable in browser code, so removing the `VITE_` prefix does not make it secret. `LEAD_SERVICE_URL`
+and `VITE_*` values are also public in the browser bundle. Redeploy Vercel after changing its environment
 variables. FastAPI has its own `LEAD_SERVICE_URL` variable, which should point privately to Spring, for example:
 `http://${{lead-service.RAILWAY_PRIVATE_DOMAIN}}:8080`. The
 [dashboard env template](./dashboard/.env.example) and [voice-service env template](./infrastructure/voice-service.env.example)

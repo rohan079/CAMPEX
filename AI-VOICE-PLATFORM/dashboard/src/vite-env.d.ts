@@ -2,7 +2,7 @@
 
 interface ImportMetaEnv {
   readonly LEAD_SERVICE_URL?: string;
-  readonly VITE_DASHBOARD_API_KEY?: string;
+  readonly DASHBOARD_API_KEY?: string;
 }
 
 interface ImportMeta {

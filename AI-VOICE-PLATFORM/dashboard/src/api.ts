@@ -19,17 +19,33 @@ import type {
   SalePage,
 } from "./types";
 
-const dashboardKey = import.meta.env.VITE_DASHBOARD_API_KEY;
+const dashboardKey = import.meta.env.DASHBOARD_API_KEY;
 const leadServiceUrl = (import.meta.env.LEAD_SERVICE_URL || "").replace(/\/+$/, "");
+
+function apiUrl(path: string): string {
+  const endpoint = path.startsWith("/") ? path : `/${path}`;
+  if (!leadServiceUrl) return endpoint;
+
+  let baseUrl: URL;
+  try {
+    baseUrl = new URL(leadServiceUrl);
+  } catch {
+    throw new Error("LEAD_SERVICE_URL must include https:// and contain only the backend origin.");
+  }
+  if (!/^https?:$/.test(baseUrl.protocol) || baseUrl.pathname !== "/" || baseUrl.search || baseUrl.hash) {
+    throw new Error("LEAD_SERVICE_URL must be an HTTP(S) origin without an API path.");
+  }
+  return `${baseUrl.origin}${endpoint}`;
+}
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers);
   if (dashboardKey) headers.set("X-Dashboard-Key", dashboardKey);
   if (init?.body) headers.set("Content-Type", "application/json");
+  const url = apiUrl(path);
   let response: Response;
   try {
-    const endpoint = path.startsWith("/") ? path : `/${path}`;
-    response = await fetch(`${leadServiceUrl}${endpoint}`, { ...init, headers });
+    response = await fetch(url, { ...init, headers });
   } catch {
     throw new Error("Cannot reach the API. Check LEAD_SERVICE_URL and the lead service, then refresh.");
   }
@@ -42,7 +58,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       message = response.statusText;
     }
     if (response.status === 401) {
-      message = "Dashboard key was rejected. Set VITE_DASHBOARD_API_KEY to the same value as DASHBOARD_API_KEY.";
+      message = "Dashboard key was rejected. Set DASHBOARD_API_KEY in Vercel to match the Spring service.";
     }
     throw new Error(message || `Request failed (${response.status})`);
   }

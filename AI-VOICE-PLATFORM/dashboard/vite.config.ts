@@ -6,7 +6,7 @@ const target = process.env.API_PROXY_TARGET || "http://127.0.0.1:8080";
 
 export default defineConfig({
   plugins: [react()],
-  envPrefix: ["VITE_", "LEAD_SERVICE_URL"],
+  envPrefix: ["VITE_", "LEAD_SERVICE_URL", "DASHBOARD_API_KEY"],
   server: {
     host: true,
     port: 5173,
