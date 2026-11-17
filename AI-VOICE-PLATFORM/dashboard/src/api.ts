@@ -30,10 +30,13 @@ export class ApiError extends Error {
 async function authHeaders(init?: RequestInit): Promise<Headers> {
   const headers = new Headers(init?.headers);
   if (init?.body) headers.set("Content-Type", "application/json");
+  // Wait for Firebase to finish restoring/redirect login before reading currentUser.
+  await auth.authStateReady();
   const user = auth.currentUser;
-  if (user) {
-    headers.set("Authorization", `Bearer ${await user.getIdToken()}`);
+  if (!user) {
+    throw new ApiError("Firebase authentication required", 401);
   }
+  headers.set("Authorization", `Bearer ${await user.getIdToken()}`);
   return headers;
 }
 

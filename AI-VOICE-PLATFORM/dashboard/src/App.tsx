@@ -50,8 +50,23 @@ export function App() {
       if (active) setAuthError(mapFirebaseAuthError(err));
     });
     const unsubscribe = onAuthStateChanged(auth, (user) => {
-      setAuthState(user ? "authenticated" : "anonymous");
-      if (user) setAuthError(null);
+      if (!active) return;
+      if (!user) {
+        setAuthState("anonymous");
+        return;
+      }
+      // Ensure an ID token exists before the dashboard fires API calls.
+      void user.getIdToken()
+        .then(() => {
+          if (!active) return;
+          setAuthError(null);
+          setAuthState("authenticated");
+        })
+        .catch((err) => {
+          if (!active) return;
+          setAuthError(err instanceof Error ? err.message : "Could not establish Firebase session");
+          setAuthState("anonymous");
+        });
     });
     return () => {
       active = false;

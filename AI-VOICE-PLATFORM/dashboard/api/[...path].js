@@ -15,10 +15,17 @@ function requestBody(req) {
   return JSON.stringify(req.body);
 }
 
+function headerValue(req, name) {
+  const value = req.headers[name];
+  if (typeof value === "string") return value;
+  if (Array.isArray(value) && typeof value[0] === "string") return value[0];
+  return undefined;
+}
+
 export default async function handler(req, res) {
   let backend;
   try {
-    backend = new URL(process.env.CLIENT_SERVICE_URL);
+    backend = new URL(process.env.CLIENT_SERVICE_URL || process.env.LEAD_SERVICE_URL);
   } catch {
     res.statusCode = 503;
     res.setHeader("Content-Type", "application/json");
@@ -39,8 +46,8 @@ export default async function handler(req, res) {
   const upstream = new URL(backendPath(incoming.pathname) + incoming.search, backend.origin);
   const headers = new Headers();
   for (const name of ["accept", "authorization", "content-type", "cookie", "x-ad-popup-token"]) {
-    const value = req.headers[name];
-    if (typeof value === "string") headers.set(name, value);
+    const value = headerValue(req, name);
+    if (value) headers.set(name, value);
   }
 
   try {
