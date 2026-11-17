@@ -48,6 +48,23 @@ class MetaGraphClientTest {
     }
 
     @Test
+    void parsesJsonTokenResponsesEvenWhenMetaUsesTextPlainContentType() {
+        RestClient.Builder builder = RestClient.builder();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        server.expect(requestTo(org.hamcrest.Matchers.startsWith(
+                        "https://graph.facebook.com/v27.0/oauth/access_token?")))
+                .andRespond(withSuccess("""
+                        {"access_token":"test-user-token","token_type":"bearer","expires_in":3600}
+                        """, MediaType.TEXT_PLAIN));
+
+        MetaGraphClient.Token token = new MetaGraphClient(properties(), builder, new ObjectMapper())
+                .exchangeCode("one-time-code");
+
+        assertEquals("test-user-token", token.value());
+        server.verify();
+    }
+
+    @Test
     void revokesMetaLoginGrantServerSide() {
         RestClient.Builder builder = RestClient.builder();
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();

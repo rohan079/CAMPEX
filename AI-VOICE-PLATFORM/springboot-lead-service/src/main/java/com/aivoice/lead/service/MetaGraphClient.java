@@ -156,9 +156,15 @@ public class MetaGraphClient {
         parameters.forEach(builder::queryParam);
         URI uri = builder.build().encode().toUri();
         try {
-            JsonNode body = client.method(method).uri(uri).retrieve().body(JsonNode.class);
-            if (body == null || body.isMissingNode()) throw new MetaGraphException(502, -1, "empty_response");
-            return body;
+            String responseBody = client.method(method).uri(uri).retrieve().body(String.class);
+            if (responseBody == null || responseBody.isBlank()) {
+                throw new MetaGraphException(502, -1, "empty_response");
+            }
+            try {
+                return mapper.readTree(responseBody);
+            } catch (IOException e) {
+                throw new MetaGraphException(502, -1, "invalid_json_response");
+            }
         } catch (RestClientResponseException e) {
             int graphCode = -1;
             try {
