@@ -17,10 +17,10 @@ function responseRecorder() {
 }
 
 test("proxies OAuth routes, forwarding session cookies and Meta redirects", async () => {
-  const previousUrl = process.env.LEAD_SERVICE_URL;
+  const previousUrl = process.env.CLIENT_SERVICE_URL;
   const previousFetch = globalThis.fetch;
   let sentRequest;
-  process.env.LEAD_SERVICE_URL = "https://lead.example.test";
+  process.env.CLIENT_SERVICE_URL = "https://lead.example.test";
   globalThis.fetch = async (url, options) => {
     sentRequest = { url: String(url), options };
     return new Response(null, {
@@ -44,16 +44,16 @@ test("proxies OAuth routes, forwarding session cookies and Meta redirects", asyn
     assert.equal(response.headers.location, "https://www.facebook.com/v27.0/dialog/oauth");
   } finally {
     globalThis.fetch = previousFetch;
-    if (previousUrl === undefined) delete process.env.LEAD_SERVICE_URL;
-    else process.env.LEAD_SERVICE_URL = previousUrl;
+    if (previousUrl === undefined) delete process.env.CLIENT_SERVICE_URL;
+    else process.env.CLIENT_SERVICE_URL = previousUrl;
   }
 });
 
 test("proxies ordinary API paths unchanged and does not cache them", async () => {
-  const previousUrl = process.env.LEAD_SERVICE_URL;
+  const previousUrl = process.env.CLIENT_SERVICE_URL;
   const previousFetch = globalThis.fetch;
   let sentUrl;
-  process.env.LEAD_SERVICE_URL = "https://lead.example.test";
+  process.env.CLIENT_SERVICE_URL = "https://lead.example.test";
   globalThis.fetch = async (url) => {
     sentUrl = String(url);
     return new Response('{"ok":true}', { status: 200, headers: { "content-type": "application/json" } });
@@ -68,16 +68,16 @@ test("proxies ordinary API paths unchanged and does not cache them", async () =>
     assert.equal(response.body.toString(), '{"ok":true}');
   } finally {
     globalThis.fetch = previousFetch;
-    if (previousUrl === undefined) delete process.env.LEAD_SERVICE_URL;
-    else process.env.LEAD_SERVICE_URL = previousUrl;
+    if (previousUrl === undefined) delete process.env.CLIENT_SERVICE_URL;
+    else process.env.CLIENT_SERVICE_URL = previousUrl;
   }
 });
 
 test("maps login requests to Spring and returns the HttpOnly session cookie to Vercel", async () => {
-  const previousUrl = process.env.LEAD_SERVICE_URL;
+  const previousUrl = process.env.CLIENT_SERVICE_URL;
   const previousFetch = globalThis.fetch;
   let sentRequest;
-  process.env.LEAD_SERVICE_URL = "https://lead.example.test";
+  process.env.CLIENT_SERVICE_URL = "https://lead.example.test";
   globalThis.fetch = async (url, options) => {
     sentRequest = { url: String(url), options };
     return new Response('{"email":"admin@example.test"}', {
@@ -107,7 +107,7 @@ test("maps login requests to Spring and returns the HttpOnly session cookie to V
     assert.match(response.headers["set-cookie"].toString(), /Secure/);
   } finally {
     globalThis.fetch = previousFetch;
-    if (previousUrl === undefined) delete process.env.LEAD_SERVICE_URL;
-    else process.env.LEAD_SERVICE_URL = previousUrl;
+    if (previousUrl === undefined) delete process.env.CLIENT_SERVICE_URL;
+    else process.env.CLIENT_SERVICE_URL = previousUrl;
   }
 });

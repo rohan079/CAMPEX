@@ -18,11 +18,11 @@ function requestBody(req) {
 export default async function handler(req, res) {
   let backend;
   try {
-    backend = new URL(process.env.LEAD_SERVICE_URL);
+    backend = new URL(process.env.CLIENT_SERVICE_URL);
   } catch {
     res.statusCode = 503;
     res.setHeader("Content-Type", "application/json");
-    res.end(JSON.stringify({ detail: "LEAD_SERVICE_URL is not configured as an absolute URL" }));
+    res.end(JSON.stringify({ detail: "CLIENT_SERVICE_URL is not configured as an absolute URL" }));
     return;
   }
   const localHttp = process.env.NODE_ENV !== "production"
@@ -31,7 +31,7 @@ export default async function handler(req, res) {
       || backend.pathname !== "/" || backend.search || backend.hash) {
     res.statusCode = 503;
     res.setHeader("Content-Type", "application/json");
-    res.end(JSON.stringify({ detail: "LEAD_SERVICE_URL must be an HTTPS origin without a path" }));
+    res.end(JSON.stringify({ detail: "CLIENT_SERVICE_URL must be an HTTPS origin without a path" }));
     return;
   }
 

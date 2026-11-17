@@ -336,7 +336,7 @@ For the FastAPI Railway service, set `LEAD_SERVICE_URL=http://${{lead-service.RA
 the same `INTERNAL_SERVICE_KEY`. Replace `lead-service` and `voice-service` in Railway references with the exact
 service names you use.
 
-For Vercel, set the server-side function variable `LEAD_SERVICE_URL=https://campex-production.up.railway.app` in the
+For Vercel, set the server-side function variable `CLIENT_SERVICE_URL=https://campex-production.up.railway.app` in the
 Vercel project. Do not prefix it with `VITE_`: the `[...path].js` Vercel function proxies dashboard requests to Spring,
 and the backend URL is not embedded in browser code. The proxy forwards the HttpOnly admin session cookie. Set
 `CAMPEX_FRONTEND_URL=https://campexdashboard.vercel.app` on Spring; that is where the OAuth callback returns the user.
