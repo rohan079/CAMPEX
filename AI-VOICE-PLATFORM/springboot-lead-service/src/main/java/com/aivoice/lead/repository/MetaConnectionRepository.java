@@ -9,5 +9,5 @@ public interface MetaConnectionRepository extends JpaRepository<MetaConnection, 
 
     Optional<MetaConnection> findByOwnerEmail(String ownerEmail);
 
-    long deleteByOwnerEmail(String ownerEmail);
+    void deleteByOwnerEmail(String ownerEmail);
 }

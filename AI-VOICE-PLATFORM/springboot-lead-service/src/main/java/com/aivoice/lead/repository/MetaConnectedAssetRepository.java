@@ -9,5 +9,5 @@ public interface MetaConnectedAssetRepository extends JpaRepository<MetaConnecte
 
     List<MetaConnectedAsset> findAllByConnectionIdOrderByAssetTypeAscNameAsc(UUID connectionId);
 
-    long deleteAllByConnectionId(UUID connectionId);
+    void deleteAllByConnectionId(UUID connectionId);
 }

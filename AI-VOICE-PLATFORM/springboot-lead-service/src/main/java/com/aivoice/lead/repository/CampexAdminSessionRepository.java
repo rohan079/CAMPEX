@@ -10,7 +10,7 @@ public interface CampexAdminSessionRepository extends JpaRepository<CampexAdminS
 
     Optional<CampexAdminSession> findByTokenHashAndExpiresAtAfter(String tokenHash, Instant now);
 
-    long deleteByTokenHash(String tokenHash);
+    void deleteByTokenHash(String tokenHash);
 
-    long deleteByExpiresAtBefore(Instant now);
+    void deleteByExpiresAtBefore(Instant now);
 }
