@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
-import { getAnalytics, getClients, getHealth, getLeadReviewStats } from "./api";
+import { AdminLogin } from "./AdminLogin";
+import { ApiError, getAdminSession, getAnalytics, getClients, getHealth, getLeadReviewStats, logoutAdmin } from "./api";
 import { CampaignStudio } from "./CampaignStudio";
 import { ChannelsPage } from "./ChannelsPage";
 import { ClientsPage } from "./ClientsPage";
@@ -27,7 +28,9 @@ function initialDays(): number {
 }
 
 export function App() {
-  const [view, setView] = useState<View>("campaigns");
+  const [view, setView] = useState<View>(() => new URLSearchParams(window.location.search).has("meta") ? "channels" : "campaigns");
+  const [authState, setAuthState] = useState<"checking" | "authenticated" | "anonymous">("checking");
+  const [authError, setAuthError] = useState<string | null>(null);
   const [clients, setClients] = useState<Client[]>([]);
   const [clientId, setClientId] = useState(() => localStorage.getItem(CLIENT_KEY) ?? "");
   const [days, setDays] = useState(initialDays);
@@ -37,6 +40,27 @@ export function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
+
+  useEffect(() => {
+    let active = true;
+    void getAdminSession()
+      .then(() => { if (active) setAuthState("authenticated"); })
+      .catch((err) => {
+        if (!active) return;
+        setAuthState("anonymous");
+        setAuthError(err instanceof ApiError && err.status === 401 ? null : err instanceof Error ? err.message : "Sign in to continue");
+      });
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    const expireSession = () => {
+      setAuthError(null);
+      setAuthState("anonymous");
+    };
+    window.addEventListener("campex:session-expired", expireSession);
+    return () => window.removeEventListener("campex:session-expired", expireSession);
+  }, []);
 
   const currentClient = clients.find((client) => client.id === clientId);
   const scopeName = currentClient?.name ?? "All clients";
@@ -50,13 +74,16 @@ export function App() {
     }
   }, []);
 
-  useEffect(() => { void loadClients(); }, [loadClients]);
+  useEffect(() => {
+    if (authState === "authenticated") void loadClients();
+  }, [authState, loadClients]);
 
   useEffect(() => {
+    if (authState !== "authenticated") return;
     let active = true;
     void getHealth().then((value) => { if (active) setHealth(value); }).catch(() => { if (active) setHealth(null); });
     return () => { active = false; };
-  }, [refreshKey]);
+  }, [authState, refreshKey]);
 
   useEffect(() => {
     if (clients.length && clientId && !clients.some((client) => client.id === clientId)) {
@@ -66,15 +93,16 @@ export function App() {
   }, [clients, clientId]);
 
   useEffect(() => {
+    if (authState !== "authenticated") return;
     let active = true;
     void getLeadReviewStats(clientId || undefined)
       .then((value) => { if (active) setReviewStats(value); })
       .catch(() => { if (active) setReviewStats({ pending: 0, accepted: 0, rejected: 0 }); });
     return () => { active = false; };
-  }, [clientId, refreshKey]);
+  }, [authState, clientId, refreshKey]);
 
   useEffect(() => {
-    if (view !== "performance") return;
+    if (authState !== "authenticated" || view !== "performance") return;
     let active = true;
     const pull = async () => {
       setLoading(true);
@@ -92,7 +120,7 @@ export function App() {
     void pull();
     const timer = window.setInterval(() => void pull(), 30000);
     return () => { active = false; window.clearInterval(timer); };
-  }, [view, clientId, days, refreshKey]);
+  }, [authState, view, clientId, days, refreshKey]);
 
   function selectClient(id: string) {
     setClientId(id);
@@ -105,6 +133,16 @@ export function App() {
     localStorage.setItem(DAYS_KEY, String(value));
   }
 
+  async function signOut() {
+    try {
+      await logoutAdmin();
+    } catch (err) {
+      setAuthError(err instanceof Error ? err.message : "Could not sign out");
+    } finally {
+      setAuthState("anonymous");
+    }
+  }
+
   const refresh = useCallback(() => setRefreshKey((key) => key + 1), []);
 
   function navItem(target: View, icon: string, label: string, count?: number) {
@@ -112,6 +150,13 @@ export function App() {
       <span className="side-icon" aria-hidden="true">{icon}</span><span>{label}</span>
       {count !== undefined && <span className="side-count">{num(count)}</span>}
     </button>;
+  }
+
+  if (authState === "checking") {
+    return <main className="admin-login-shell"><p>Checking admin session…</p></main>;
+  }
+  if (authState === "anonymous") {
+    return <AdminLogin initialError={authError} onAuthenticated={() => { setAuthError(null); setAuthState("authenticated"); }} />;
   }
 
   return (
@@ -152,6 +197,7 @@ export function App() {
             </div>}
             <button type="button" className="icon-button" onClick={refresh} aria-label="Refresh data" title="Refresh data">↻</button>
             <button type="button" className="primary-button top-create" onClick={() => setView("campaigns")}>＋ New campaign</button>
+            <button type="button" className="secondary-button" onClick={() => void signOut()}>Sign out</button>
           </div>
         </header>
 

@@ -12,7 +12,6 @@ public record AppProperties(
         String businessTimezone,
         int followUpCallDays,
         int callPollSeconds,
-        String dashboardApiKey,
         String adPopupToken,
         String internalServiceKey,
         String corsOrigins,

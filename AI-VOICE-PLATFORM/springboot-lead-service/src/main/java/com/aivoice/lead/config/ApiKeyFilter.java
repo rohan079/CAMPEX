@@ -1,5 +1,6 @@
 package com.aivoice.lead.config;
 
+import com.aivoice.lead.service.AdminSessionService;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -10,18 +11,16 @@ import java.security.MessageDigest;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
-/**
- * Shared-key checks for the three kinds of caller this service has:
- * the ad popup, the operator dashboard, and the voice service.
- * Meta's webhook is not covered here: it is verified by its own HMAC signature.
- */
+/** Checks the popup and internal service keys; the dashboard uses a CAMPEX admin session. */
 @Component
 public class ApiKeyFilter extends OncePerRequestFilter {
 
     private final AppProperties props;
+    private final AdminSessionService adminSessions;
 
-    public ApiKeyFilter(AppProperties props) {
+    public ApiKeyFilter(AppProperties props, AdminSessionService adminSessions) {
         this.props = props;
+        this.adminSessions = adminSessions;
     }
 
     @Override
@@ -41,7 +40,13 @@ public class ApiKeyFilter extends OncePerRequestFilter {
                 return;
             }
         } else if (path.startsWith("/api/")) {
-            if (!allowed(request, "X-Dashboard-Key", props.dashboardApiKey(), response, "Dashboard key")) {
+            if (!adminSessions.isConfigured()) {
+                if (!props.isDevelopment()) {
+                    reject(response, 503, "CAMPEX admin authentication is not configured");
+                    return;
+                }
+            } else if (adminSessions.authenticate(request).isEmpty()) {
+                reject(response, 401, "CAMPEX admin login required");
                 return;
             }
         }

@@ -21,7 +21,6 @@ class AppConfigCorsTest {
                 "Asia/Kolkata",
                 7,
                 3,
-                "dashboard-key",
                 "popup-token",
                 "service-key",
                 origin + ",https://custom.campex.example",

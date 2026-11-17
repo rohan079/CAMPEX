@@ -19,35 +19,21 @@ import type {
   SalePage,
 } from "./types";
 
-const dashboardKey = import.meta.env.DASHBOARD_API_KEY;
-const leadServiceUrl = (import.meta.env.LEAD_SERVICE_URL || "").replace(/\/+$/, "");
-
-function apiUrl(path: string): string {
-  const endpoint = path.startsWith("/") ? path : `/${path}`;
-  if (!leadServiceUrl) return endpoint;
-
-  let baseUrl: URL;
-  try {
-    baseUrl = new URL(leadServiceUrl);
-  } catch {
-    throw new Error("LEAD_SERVICE_URL must include https:// and contain only the backend origin.");
+export class ApiError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message);
+    this.name = "ApiError";
   }
-  if (!/^https?:$/.test(baseUrl.protocol) || baseUrl.pathname !== "/" || baseUrl.search || baseUrl.hash) {
-    throw new Error("LEAD_SERVICE_URL must be an HTTP(S) origin without an API path.");
-  }
-  return `${baseUrl.origin}${endpoint}`;
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers);
-  if (dashboardKey) headers.set("X-Dashboard-Key", dashboardKey);
   if (init?.body) headers.set("Content-Type", "application/json");
-  const url = apiUrl(path);
   let response: Response;
   try {
-    response = await fetch(url, { ...init, headers });
+    response = await fetch(path, { ...init, headers, credentials: "same-origin" });
   } catch {
-    throw new Error("Cannot reach the API. Check LEAD_SERVICE_URL and the lead service, then refresh.");
+    throw new Error("Cannot reach the CAMPEX API. Check the dashboard deployment and backend status, then refresh.");
   }
   if (!response.ok) {
     let message = response.statusText;
@@ -57,16 +43,73 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     } catch {
       message = response.statusText;
     }
-    if (response.status === 401) {
-      message = "Dashboard key was rejected. Set DASHBOARD_API_KEY in Vercel to match the Spring service.";
+    if (response.status === 401 && path !== "/api/auth/login" && path !== "/api/auth/session") {
+      window.dispatchEvent(new Event("campex:session-expired"));
     }
-    throw new Error(message || `Request failed (${response.status})`);
+    if (response.status === 401) {
+      message = "CAMPEX admin session expired. Sign in again to continue.";
+    }
+    throw new ApiError(message || `Request failed (${response.status})`, response.status);
   }
+  if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
 }
 
+export interface AdminSession {
+  email: string;
+  expires_at?: string;
+  development?: boolean;
+}
+
+export interface MetaPage {
+  id: string;
+  name: string;
+  category?: string | null;
+}
+
+export interface MetaAdAccount {
+  id: string;
+  name: string;
+  account_id?: string | null;
+  account_status?: number | null;
+  currency?: string | null;
+}
+
+export interface MetaConnectionStatus {
+  connected: boolean;
+  expired?: boolean;
+  meta_user_name?: string | null;
+  connected_at?: string | null;
+  token_expires_at?: string | null;
+  pages: MetaPage[];
+  ad_accounts: MetaAdAccount[];
+}
+
+export function getAdminSession(): Promise<AdminSession> {
+  return request<AdminSession>("/api/auth/session");
+}
+
+export function loginAdmin(email: string, password: string): Promise<AdminSession> {
+  return request<AdminSession>("/api/auth/login", {
+    method: "POST",
+    body: JSON.stringify({ email, password }),
+  });
+}
+
+export function logoutAdmin(): Promise<void> {
+  return request<void>("/api/auth/logout", { method: "POST" });
+}
+
+export function getMetaConnection(): Promise<MetaConnectionStatus> {
+  return request<MetaConnectionStatus>("/api/oauth/meta/status");
+}
+
+export function disconnectMeta(): Promise<void> {
+  return request<void>("/api/oauth/meta/connection", { method: "DELETE" });
+}
+
 export function getHealth(): Promise<Health> {
-  return request<Health>("/health");
+  return request<Health>("/api/health");
 }
 
 export function getDashboard(clientId?: string): Promise<DashboardPayload> {

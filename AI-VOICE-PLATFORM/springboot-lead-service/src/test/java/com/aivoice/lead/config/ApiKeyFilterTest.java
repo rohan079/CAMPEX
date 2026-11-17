@@ -1,18 +1,31 @@
 package com.aivoice.lead.config;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import jakarta.servlet.FilterChain;
+import java.time.Instant;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockFilterChain;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
+import com.aivoice.lead.service.AdminSessionService;
 
 class ApiKeyFilterTest {
 
-    private ApiKeyFilter filter(String environment, String dashboard, String popup, String service) {
-        return new ApiKeyFilter(new AppProperties(environment, "Acme", "", "Asia/Kolkata", 7, 3,
-                dashboard, popup, service, "", null, "http://localhost:8000", 30, 1));
+    private ApiKeyFilter filter(String environment, String popup, String service,
+                                boolean authConfigured, boolean authenticated) {
+        AppProperties properties = new AppProperties(environment, "Acme", "", "Asia/Kolkata", 7, 3,
+                popup, service, "", null, "http://localhost:8000", 30, 1);
+        AdminSessionService sessions = mock(AdminSessionService.class);
+        when(sessions.isConfigured()).thenReturn(authConfigured);
+        when(sessions.authenticate(any())).thenReturn(authenticated
+                ? Optional.of(new AdminSessionService.AdminIdentity("admin@example.test", Instant.MAX))
+                : Optional.empty());
+        return new ApiKeyFilter(properties, sessions);
     }
 
     private int status(ApiKeyFilter filter, String method, String path, String header, String value) throws Exception {
@@ -27,10 +40,12 @@ class ApiKeyFilterTest {
     }
 
     @Test
-    void eachCallerNeedsItsOwnKey() throws Exception {
-        ApiKeyFilter filter = filter("production", "dash", "popup", "svc");
-        assertEquals(401, status(filter, "GET", "/api/leads", null, null));
-        assertEquals(200, status(filter, "GET", "/api/leads", "X-Dashboard-Key", "dash"));
+    void dashboardNeedsAnAdminSessionAndOtherCallersNeedTheirOwnKeys() throws Exception {
+        ApiKeyFilter filter = filter("production", "popup", "svc", true, true);
+        ApiKeyFilter unauthenticated = filter("production", "popup", "svc", true, false);
+        assertEquals(401, status(unauthenticated, "GET", "/api/leads", null, null));
+        assertEquals(401, status(unauthenticated, "GET", "/api/leads", "X-Dashboard-Key", "old-shared-key"));
+        assertEquals(200, status(filter, "GET", "/api/leads", null, null));
         assertEquals(401, status(filter, "POST", "/api/ad-leads", "X-Dashboard-Key", "dash"));
         assertEquals(200, status(filter, "POST", "/api/ad-leads", "X-Ad-Popup-Token", "popup"));
         assertEquals(401, status(filter, "POST", "/internal/call-events", "X-Dashboard-Key", "dash"));
@@ -39,20 +54,20 @@ class ApiKeyFilterTest {
 
     @Test
     void webhookAndHealthAreNotKeyed() throws Exception {
-        ApiKeyFilter filter = filter("production", "dash", "popup", "svc");
+        ApiKeyFilter filter = filter("production", "popup", "svc", true, false);
         assertEquals(200, status(filter, "POST", "/webhooks/whatsapp", null, null));
         assertEquals(200, status(filter, "GET", "/health", null, null));
     }
 
     @Test
     void preflightPassesThrough() throws Exception {
-        assertEquals(200, status(filter("production", "dash", "popup", "svc"), "OPTIONS", "/api/leads", null, null));
+        assertEquals(200, status(filter("production", "popup", "svc", true, false), "OPTIONS", "/api/leads", null, null));
     }
 
     @Test
     void missingKeysAreOpenInDevelopmentAndRefusedInProduction() throws Exception {
-        assertEquals(200, status(filter("development", "", "", ""), "GET", "/api/leads", null, null));
-        assertEquals(503, status(filter("production", "", "", ""), "GET", "/api/leads", null, null));
-        assertEquals(503, status(filter("production", "", "", ""), "POST", "/internal/call-events", null, null));
+        assertEquals(200, status(filter("development", "", "", false, false), "GET", "/api/leads", null, null));
+        assertEquals(503, status(filter("production", "", "", false, false), "GET", "/api/leads", null, null));
+        assertEquals(503, status(filter("production", "", "", false, false), "POST", "/internal/call-events", null, null));
     }
 }

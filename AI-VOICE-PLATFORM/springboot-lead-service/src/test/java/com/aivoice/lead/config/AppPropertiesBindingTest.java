@@ -20,7 +20,6 @@ class AppPropertiesBindingTest {
                 Map.entry("app.business-timezone", "Asia/Kolkata"),
                 Map.entry("app.follow-up-call-days", "7"),
                 Map.entry("app.call-poll-seconds", "3"),
-                Map.entry("app.dashboard-api-key", ""),
                 Map.entry("app.ad-popup-token", ""),
                 Map.entry("app.internal-service-key", ""),
                 Map.entry("app.cors-origins", ""),

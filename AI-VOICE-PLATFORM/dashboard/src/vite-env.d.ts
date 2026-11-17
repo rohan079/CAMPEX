@@ -1,10 +1,1 @@
 /// <reference types="vite/client" />
-
-interface ImportMetaEnv {
-  readonly LEAD_SERVICE_URL?: string;
-  readonly DASHBOARD_API_KEY?: string;
-}
-
-interface ImportMeta {
-  readonly env: ImportMetaEnv;
-}

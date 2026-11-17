@@ -51,7 +51,7 @@ class ClientServiceTest {
         clientLead.setId(UUID.randomUUID());
         when(leads.findByClientId(client.getId())).thenReturn(List.of(clientLead));
         AppProperties props = new AppProperties("development", "Default", "", "Asia/Kolkata", 7, 3,
-                "", "", "", "", null, "http://voice", 5, 1);
+                "", "", "", null, "http://voice", 5, 1);
         service = new ClientService(clients, leads, calls, mock(AdRepository.class), analytics, props);
     }
 

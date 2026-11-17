@@ -63,7 +63,7 @@ class CallOrchestratorServiceTest {
         when(clients.businessDescription(any())).thenReturn("");
         when(clients.knowledgeBase(any())).thenReturn("");
         Clock clock = Clock.fixed(Instant.parse("2026-11-02T06:00:00Z"), ZoneOffset.UTC);
-        AppProperties props = new AppProperties("development", "Acme", "", "Asia/Kolkata", 7, 3, "", "", "", "",
+        AppProperties props = new AppProperties("development", "Acme", "", "Asia/Kolkata", 7, 3, "", "", "",
                 null, "http://localhost:8000", 5, 1);
         PlatformTransactionManager txManager = mock(PlatformTransactionManager.class);
         when(txManager.getTransaction(any(TransactionDefinition.class))).thenReturn(mock(TransactionStatus.class));

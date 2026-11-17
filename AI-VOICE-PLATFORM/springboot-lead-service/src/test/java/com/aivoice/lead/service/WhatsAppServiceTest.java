@@ -23,7 +23,7 @@ class WhatsAppServiceTest {
     private final ObjectMapper mapper = new ObjectMapper();
 
     private WhatsAppService service(String environment) {
-        AppProperties props = new AppProperties(environment, "Acme", "", "Asia/Kolkata", 7, 3, "", "", "", "",
+        AppProperties props = new AppProperties(environment, "Acme", "", "Asia/Kolkata", 7, 3, "", "", "",
                 new AppProperties.WhatsApp("verify-me", SECRET, "token", "123", "v1", "http://localhost"),
                 "http://localhost:8000", 5, 1);
         return new WhatsAppService(props, mapper, RestClient.builder());

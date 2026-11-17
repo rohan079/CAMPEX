@@ -3,6 +3,8 @@ package com.aivoice.lead.config;
 import com.aivoice.lead.service.Exceptions.InvalidPhoneException;
 import com.aivoice.lead.service.Exceptions.MessageDeliveryException;
 import com.aivoice.lead.service.Exceptions.NotFoundException;
+import com.aivoice.lead.service.AdminSessionService.AuthException;
+import com.aivoice.lead.service.MetaGraphClient.MetaGraphException;
 import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -27,6 +29,17 @@ public class ApiExceptionHandler {
     @ExceptionHandler(NotFoundException.class)
     public ResponseEntity<Map<String, String>> notFound(NotFoundException e) {
         return body(HttpStatus.NOT_FOUND, e.getMessage());
+    }
+
+    @ExceptionHandler(AuthException.class)
+    public ResponseEntity<Map<String, String>> authentication(AuthException e) {
+        return body(e.status(), e.getMessage());
+    }
+
+    @ExceptionHandler(MetaGraphException.class)
+    public ResponseEntity<Map<String, String>> metaGraph(MetaGraphException e) {
+        log.warn("Meta Graph request failed during a user action (HTTP {}, code {})", e.httpStatus(), e.graphCode());
+        return body(HttpStatus.BAD_GATEWAY, "Meta could not complete the requested account operation");
     }
 
     @ExceptionHandler(MessageDeliveryException.class)

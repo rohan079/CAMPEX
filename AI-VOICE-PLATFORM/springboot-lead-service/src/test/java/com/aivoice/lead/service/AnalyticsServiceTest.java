@@ -46,7 +46,7 @@ class AnalyticsServiceTest {
         client.setName("Sunrise Homes");
         when(clientService.require(CLIENT)).thenReturn(client);
         when(clientService.businessName(client)).thenReturn("Sunrise Homes");
-        AppProperties props = new AppProperties("development", "Acme", "", "Asia/Kolkata", 7, 3, "", "", "", "",
+        AppProperties props = new AppProperties("development", "Acme", "", "Asia/Kolkata", 7, 3, "", "", "",
                 null, "http://localhost:8000", 30, 1);
         service = new AnalyticsService(repo, mock(ClientRepository.class), clientService, props,
                 Clock.fixed(Instant.parse("2026-11-02T06:00:00Z"), ZoneOffset.UTC), "INR");
