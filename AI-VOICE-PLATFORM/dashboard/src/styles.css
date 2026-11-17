@@ -598,8 +598,7 @@ button:disabled { cursor: not-allowed; opacity: .52; }
 .social-button .social-mark { width: 22px; height: 22px; display: grid; place-items: center; border-radius: 6px; font-size: .85rem; font-weight: 750; color: #fff; }
 .social-button.google .social-mark { background: #4285f4; }
 .social-button.facebook .social-mark { background: #1877f2; }
-.login-divider { display: grid; grid-template-columns: 1fr auto 1fr; gap: 12px; align-items: center; margin: 18px 0 16px; color: #9aa1b2; font-size: .72rem; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
-.login-divider::before, .login-divider::after { content: ""; height: 1px; background: #e6e9f0; }
+.admin-login-card .global-error { margin-top: 14px; }
 .meta-connection-panel { display: grid; gap: 12px; }
 .meta-notice { margin: 0; padding: 10px 12px; border: 1px solid #c9e4d7; border-radius: 9px; color: #225c42; background: #eff8f3; font-size: .76rem; }
 .meta-notice.error { border-color: #ecc7c4; color: var(--rose); background: var(--rose-soft); }

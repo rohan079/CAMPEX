@@ -1,6 +1,8 @@
+import { onAuthStateChanged } from "firebase/auth";
 import { useCallback, useEffect, useState } from "react";
 import { AdminLogin } from "./AdminLogin";
-import { ApiError, getAdminSession, getAnalytics, getClients, getHealth, getLeadReviewStats, logoutAdmin } from "./api";
+import { getAnalytics, getClients, getHealth, getLeadReviewStats } from "./api";
+import { auth } from "./firebase";
 import { signOutFirebase } from "./firebaseAuth";
 import { CampaignStudio } from "./CampaignStudio";
 import { ChannelsPage } from "./ChannelsPage";
@@ -43,24 +45,11 @@ export function App() {
   const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
-    let active = true;
-    void getAdminSession()
-      .then(() => { if (active) setAuthState("authenticated"); })
-      .catch((err) => {
-        if (!active) return;
-        setAuthState("anonymous");
-        setAuthError(err instanceof ApiError && err.status === 401 ? null : err instanceof Error ? err.message : "Sign in to continue");
-      });
-    return () => { active = false; };
-  }, []);
-
-  useEffect(() => {
-    const expireSession = () => {
-      setAuthError(null);
-      setAuthState("anonymous");
-    };
-    window.addEventListener("campex:session-expired", expireSession);
-    return () => window.removeEventListener("campex:session-expired", expireSession);
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      setAuthState(user ? "authenticated" : "anonymous");
+      if (user) setAuthError(null);
+    });
+    return unsubscribe;
   }, []);
 
   const currentClient = clients.find((client) => client.id === clientId);
@@ -136,15 +125,11 @@ export function App() {
 
   async function signOut() {
     try {
-      await logoutAdmin();
+      await signOutFirebase();
+      setAuthError(null);
     } catch (err) {
       setAuthError(err instanceof Error ? err.message : "Could not sign out");
     } finally {
-      try {
-        await signOutFirebase();
-      } catch {
-        // Backend session is already cleared; ignore Firebase sign-out failures.
-      }
       setAuthState("anonymous");
     }
   }
@@ -159,7 +144,7 @@ export function App() {
   }
 
   if (authState === "checking") {
-    return <main className="admin-login-shell"><p>Checking admin session…</p></main>;
+    return <main className="admin-login-shell"><p>Checking sign-in…</p></main>;
   }
   if (authState === "anonymous") {
     return <AdminLogin initialError={authError} onAuthenticated={() => { setAuthError(null); setAuthState("authenticated"); }} />;

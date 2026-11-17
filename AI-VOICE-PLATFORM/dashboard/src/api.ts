@@ -43,27 +43,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     } catch {
       message = response.statusText;
     }
-    if (
-      response.status === 401
-      && path !== "/api/auth/login"
-      && path !== "/api/auth/firebase"
-      && path !== "/api/auth/session"
-    ) {
-      window.dispatchEvent(new Event("campex:session-expired"));
-    }
-    if (response.status === 401) {
-      message = "CAMPEX admin session expired. Sign in again to continue.";
-    }
     throw new ApiError(message || `Request failed (${response.status})`, response.status);
   }
   if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
-}
-
-export interface AdminSession {
-  email: string;
-  expires_at?: string;
-  development?: boolean;
 }
 
 export interface MetaPage {
@@ -88,28 +71,6 @@ export interface MetaConnectionStatus {
   token_expires_at?: string | null;
   pages: MetaPage[];
   ad_accounts: MetaAdAccount[];
-}
-
-export function getAdminSession(): Promise<AdminSession> {
-  return request<AdminSession>("/api/auth/session");
-}
-
-export function loginAdmin(email: string, password: string): Promise<AdminSession> {
-  return request<AdminSession>("/api/auth/login", {
-    method: "POST",
-    body: JSON.stringify({ email, password }),
-  });
-}
-
-export function loginAdminWithFirebase(idToken: string): Promise<AdminSession> {
-  return request<AdminSession>("/api/auth/firebase", {
-    method: "POST",
-    body: JSON.stringify({ id_token: idToken }),
-  });
-}
-
-export function logoutAdmin(): Promise<void> {
-  return request<void>("/api/auth/logout", { method: "POST" });
 }
 
 export function getMetaConnection(): Promise<MetaConnectionStatus> {

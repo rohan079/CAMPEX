@@ -1,35 +1,15 @@
 import { useState } from "react";
-import type { FormEvent } from "react";
-import { loginAdmin, loginAdminWithFirebase } from "./api";
 import { mapFirebaseAuthError, signInWithSocial, type SocialProvider } from "./firebaseAuth";
 
 export function AdminLogin({ onAuthenticated, initialError }: { onAuthenticated: () => void; initialError?: string | null }) {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [busy, setBusy] = useState<"password" | SocialProvider | null>(null);
+  const [busy, setBusy] = useState<SocialProvider | null>(null);
   const [error, setError] = useState<string | null>(initialError ?? null);
-
-  async function submit(event: FormEvent) {
-    event.preventDefault();
-    setBusy("password");
-    setError(null);
-    try {
-      await loginAdmin(email.trim(), password);
-      setPassword("");
-      onAuthenticated();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not sign in");
-    } finally {
-      setBusy(null);
-    }
-  }
 
   async function socialSignIn(provider: SocialProvider) {
     setBusy(provider);
     setError(null);
     try {
-      const { idToken } = await signInWithSocial(provider);
-      await loginAdminWithFirebase(idToken);
+      await signInWithSocial(provider);
       onAuthenticated();
     } catch (err) {
       setError(mapFirebaseAuthError(err));
@@ -44,7 +24,7 @@ export function AdminLogin({ onAuthenticated, initialError }: { onAuthenticated:
         <img className="brand-logo" src="/campex-logo.png" alt="Campex logo" />
         <p className="eyebrow">Secure workspace</p>
         <h1>Sign in to Campex</h1>
-        <p className="hint">Use Google, Facebook, or the configured administrator account.</p>
+        <p className="hint">Continue with Google or Facebook to open the workspace.</p>
 
         <div className="social-login-stack">
           <button
@@ -67,22 +47,7 @@ export function AdminLogin({ onAuthenticated, initialError }: { onAuthenticated:
           </button>
         </div>
 
-        <div className="login-divider" role="separator"><span>or</span></div>
-
-        <form onSubmit={(event) => void submit(event)}>
-          <label className="form-field">
-            <span>Email</span>
-            <input type="email" autoComplete="username" value={email} onChange={(event) => setEmail(event.target.value)} required />
-          </label>
-          <label className="form-field">
-            <span>Password</span>
-            <input type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} required />
-          </label>
-          {error && <p className="global-error" role="alert">{error}</p>}
-          <button className="primary-button" type="submit" disabled={busy !== null}>
-            {busy === "password" ? "Signing in…" : "Sign in"}
-          </button>
-        </form>
+        {error && <p className="global-error" role="alert">{error}</p>}
       </section>
     </main>
   );

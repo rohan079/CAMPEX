@@ -20,10 +20,8 @@ function providerFor(kind: SocialProvider) {
   return kind === "google" ? googleProvider : facebookProvider;
 }
 
-export async function signInWithSocial(kind: SocialProvider): Promise<{ idToken: string; email: string | null }> {
-  const result: UserCredential = await signInWithPopup(auth, providerFor(kind));
-  const idToken = await result.user.getIdToken(true);
-  return { idToken, email: result.user.email };
+export async function signInWithSocial(kind: SocialProvider): Promise<UserCredential> {
+  return signInWithPopup(auth, providerFor(kind));
 }
 
 export async function signOutFirebase(): Promise<void> {
