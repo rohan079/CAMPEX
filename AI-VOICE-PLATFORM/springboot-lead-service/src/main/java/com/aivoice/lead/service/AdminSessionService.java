@@ -68,7 +68,21 @@ public class AdminSessionService {
         if (!emailMatches || !passwordMatches) {
             throw new AuthException(HttpStatus.UNAUTHORIZED, "Invalid email or password");
         }
+        return issueSession();
+    }
 
+    @Transactional
+    public IssuedSession loginWithVerifiedEmail(String email) {
+        if (!isConfigured()) {
+            throw new AuthException(HttpStatus.SERVICE_UNAVAILABLE, "CAMPEX admin login is not configured");
+        }
+        if (email == null || !sameEmail(email, properties.email())) {
+            throw new AuthException(HttpStatus.FORBIDDEN, "This Google or Facebook account is not authorized for CAMPEX admin");
+        }
+        return issueSession();
+    }
+
+    private IssuedSession issueSession() {
         Instant now = Instant.now();
         sessions.deleteByExpiresAtBefore(now);
         byte[] random = new byte[32];

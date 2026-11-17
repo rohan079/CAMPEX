@@ -43,7 +43,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     } catch {
       message = response.statusText;
     }
-    if (response.status === 401 && path !== "/api/auth/login" && path !== "/api/auth/session") {
+    if (
+      response.status === 401
+      && path !== "/api/auth/login"
+      && path !== "/api/auth/firebase"
+      && path !== "/api/auth/session"
+    ) {
       window.dispatchEvent(new Event("campex:session-expired"));
     }
     if (response.status === 401) {
@@ -93,6 +98,13 @@ export function loginAdmin(email: string, password: string): Promise<AdminSessio
   return request<AdminSession>("/api/auth/login", {
     method: "POST",
     body: JSON.stringify({ email, password }),
+  });
+}
+
+export function loginAdminWithFirebase(idToken: string): Promise<AdminSession> {
+  return request<AdminSession>("/api/auth/firebase", {
+    method: "POST",
+    body: JSON.stringify({ id_token: idToken }),
   });
 }
 

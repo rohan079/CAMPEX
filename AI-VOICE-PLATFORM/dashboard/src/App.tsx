@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { AdminLogin } from "./AdminLogin";
 import { ApiError, getAdminSession, getAnalytics, getClients, getHealth, getLeadReviewStats, logoutAdmin } from "./api";
+import { signOutFirebase } from "./firebaseAuth";
 import { CampaignStudio } from "./CampaignStudio";
 import { ChannelsPage } from "./ChannelsPage";
 import { ClientsPage } from "./ClientsPage";
@@ -139,6 +140,11 @@ export function App() {
     } catch (err) {
       setAuthError(err instanceof Error ? err.message : "Could not sign out");
     } finally {
+      try {
+        await signOutFirebase();
+      } catch {
+        // Backend session is already cleared; ignore Firebase sign-out failures.
+      }
       setAuthState("anonymous");
     }
   }

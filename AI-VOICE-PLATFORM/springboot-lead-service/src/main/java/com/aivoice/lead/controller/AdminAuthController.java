@@ -5,6 +5,7 @@ import com.aivoice.lead.service.AdminSessionService;
 import com.aivoice.lead.service.AdminSessionService.AdminIdentity;
 import com.aivoice.lead.service.AdminSessionService.AuthException;
 import com.aivoice.lead.service.AdminSessionService.IssuedSession;
+import com.aivoice.lead.service.FirebaseTokenVerifier;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
@@ -28,31 +29,38 @@ import org.springframework.web.bind.annotation.RestController;
 public class AdminAuthController {
 
     private final AdminSessionService sessions;
+    private final FirebaseTokenVerifier firebaseTokens;
     private final AppProperties appProperties;
 
-    public AdminAuthController(AdminSessionService sessions, AppProperties appProperties) {
+    public AdminAuthController(
+            AdminSessionService sessions,
+            FirebaseTokenVerifier firebaseTokens,
+            AppProperties appProperties) {
         this.sessions = sessions;
+        this.firebaseTokens = firebaseTokens;
         this.appProperties = appProperties;
     }
 
     public record LoginRequest(@NotBlank @Email String email, @NotBlank @Size(max = 1024) String password) {
     }
 
+    public record FirebaseLoginRequest(@NotBlank @Size(max = 4096) String idToken) {
+    }
+
     @PostMapping("/login")
     public ResponseEntity<Map<String, Object>> login(@Valid @RequestBody LoginRequest body) {
         try {
-            IssuedSession session = sessions.login(body.email(), body.password());
-            ResponseCookie cookie = ResponseCookie.from(AdminSessionService.COOKIE_NAME, session.token())
-                    .httpOnly(true)
-                    .secure(!appProperties.isDevelopment())
-                    .sameSite("Lax")
-                    .path("/")
-                    .maxAge(Duration.between(java.time.Instant.now(), session.expiresAt()))
-                    .build();
-            return ResponseEntity.ok()
-                    .header(HttpHeaders.SET_COOKIE, cookie.toString())
-                    .header(HttpHeaders.CACHE_CONTROL, "no-store")
-                    .body(Map.of("email", session.ownerEmail(), "expires_at", session.expiresAt().toString()));
+            return sessionResponse(sessions.login(body.email(), body.password()));
+        } catch (AuthException e) {
+            return error(e);
+        }
+    }
+
+    @PostMapping("/firebase")
+    public ResponseEntity<Map<String, Object>> firebaseLogin(@Valid @RequestBody FirebaseLoginRequest body) {
+        try {
+            var user = firebaseTokens.verifyIdToken(body.idToken());
+            return sessionResponse(sessions.loginWithVerifiedEmail(user.email()));
         } catch (AuthException e) {
             return error(e);
         }
@@ -87,6 +95,20 @@ public class AdminAuthController {
                 .build();
         response.addHeader(HttpHeaders.SET_COOKIE, cookie.toString());
         return ResponseEntity.noContent().cacheControl(org.springframework.http.CacheControl.noStore()).build();
+    }
+
+    private ResponseEntity<Map<String, Object>> sessionResponse(IssuedSession session) {
+        ResponseCookie cookie = ResponseCookie.from(AdminSessionService.COOKIE_NAME, session.token())
+                .httpOnly(true)
+                .secure(!appProperties.isDevelopment())
+                .sameSite("Lax")
+                .path("/")
+                .maxAge(Duration.between(java.time.Instant.now(), session.expiresAt()))
+                .build();
+        return ResponseEntity.ok()
+                .header(HttpHeaders.SET_COOKIE, cookie.toString())
+                .header(HttpHeaders.CACHE_CONTROL, "no-store")
+                .body(Map.of("email", session.ownerEmail(), "expires_at", session.expiresAt().toString()));
     }
 
     private static Map<String, Object> sessionBody(AdminIdentity identity) {
