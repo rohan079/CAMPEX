@@ -2,25 +2,46 @@ package com.aivoice.lead.service;
 
 import com.aivoice.lead.config.FirebaseAuthProperties;
 import com.aivoice.lead.service.AdminSessionService.AuthException;
-import com.fasterxml.jackson.databind.JsonNode;
+import com.nimbusds.jose.JWSAlgorithm;
+import com.nimbusds.jose.jwk.JWKSet;
+import com.nimbusds.jose.jwk.RSAKey;
+import com.nimbusds.jose.jwk.source.ImmutableJWKSet;
+import com.nimbusds.jose.jwk.source.JWKSource;
+import com.nimbusds.jose.proc.JWSKeySelector;
+import com.nimbusds.jose.proc.JWSVerificationKeySelector;
+import com.nimbusds.jose.proc.SecurityContext;
+import com.nimbusds.jwt.JWTClaimsSet;
+import com.nimbusds.jwt.proc.ConfigurableJWTProcessor;
+import com.nimbusds.jwt.proc.DefaultJWTProcessor;
+import java.net.URI;
+import java.text.ParseException;
+import java.time.Instant;
 import java.util.Locale;
-import java.util.Map;
 import org.springframework.http.HttpStatus;
-import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
-import org.springframework.web.client.RestClientResponseException;
 
+/**
+ * Verifies Firebase ID tokens with Google's JWKS. Does not use the browser API key, so
+ * HTTP-referrer key restrictions cannot break server-side auth.
+ */
 @Service
 public class FirebaseTokenVerifier {
+
+    private static final String JWKS_URL =
+            "https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com";
+    private static final long JWKS_TTL_SECONDS = 3_600;
 
     private final FirebaseAuthProperties properties;
     private final RestClient client;
 
+    private volatile Instant jwksFetchedAt = Instant.EPOCH;
+    private volatile JWKSource<SecurityContext> jwkSource;
+
     public FirebaseTokenVerifier(FirebaseAuthProperties properties, RestClient.Builder builder) {
         this.properties = properties;
-        this.client = builder.baseUrl("https://identitytoolkit.googleapis.com").build();
+        this.client = builder.build();
     }
 
     public record VerifiedFirebaseUser(String email, String uid, boolean emailVerified) {
@@ -35,39 +56,74 @@ public class FirebaseTokenVerifier {
         }
 
         try {
-            JsonNode body = client.post()
-                    .uri("/v1/accounts:lookup?key={key}", properties.apiKey().trim())
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .body(Map.of("idToken", idToken.trim()))
-                    .retrieve()
-                    .body(JsonNode.class);
+            ConfigurableJWTProcessor<SecurityContext> processor = new DefaultJWTProcessor<>();
+            JWSKeySelector<SecurityContext> keySelector =
+                    new JWSVerificationKeySelector<>(JWSAlgorithm.RS256, jwkSource());
+            processor.setJWSKeySelector(keySelector);
 
-            if (body == null || !body.has("users") || !body.get("users").isArray() || body.get("users").isEmpty()) {
-                throw new AuthException(HttpStatus.UNAUTHORIZED, "Invalid Firebase ID token");
+            JWTClaimsSet claims = processor.process(idToken.trim(), null);
+            String projectId = properties.projectId().trim();
+            String expectedIssuer = "https://securetoken.google.com/" + projectId;
+            if (!projectId.equals(claims.getAudience().stream().findFirst().orElse(null))) {
+                throw new AuthException(HttpStatus.UNAUTHORIZED, "Firebase token audience mismatch");
+            }
+            if (!expectedIssuer.equals(claims.getIssuer())) {
+                throw new AuthException(HttpStatus.UNAUTHORIZED, "Firebase token issuer mismatch");
+            }
+            if (claims.getExpirationTime() == null || claims.getExpirationTime().toInstant().isBefore(Instant.now())) {
+                throw new AuthException(HttpStatus.UNAUTHORIZED, "Firebase token expired");
             }
 
-            JsonNode user = body.get("users").get(0);
-            String email = text(user, "email");
-            String uid = text(user, "localId");
-            boolean emailVerified = user.path("emailVerified").asBoolean(false);
-            if (email == null || email.isBlank() || uid == null || uid.isBlank()) {
+            String uid = claims.getSubject();
+            String email = claims.getStringClaim("email");
+            Boolean emailVerified = claims.getBooleanClaim("email_verified");
+            if (uid == null || uid.isBlank()) {
+                throw new AuthException(HttpStatus.UNAUTHORIZED, "Firebase token is missing subject");
+            }
+            if (email == null || email.isBlank()) {
                 throw new AuthException(HttpStatus.UNAUTHORIZED, "Firebase account is missing an email address");
             }
-            if (!emailVerified) {
+            if (!Boolean.TRUE.equals(emailVerified)) {
                 throw new AuthException(HttpStatus.UNAUTHORIZED, "Verify the email on this Google or Facebook account first");
             }
             return new VerifiedFirebaseUser(email.trim().toLowerCase(Locale.ROOT), uid, true);
         } catch (AuthException e) {
             throw e;
-        } catch (RestClientResponseException e) {
+        } catch (ParseException | com.nimbusds.jose.JOSEException | com.nimbusds.jose.proc.BadJOSEException e) {
             throw new AuthException(HttpStatus.UNAUTHORIZED, "Invalid or expired Firebase ID token");
-        } catch (RestClientException e) {
-            throw new AuthException(HttpStatus.BAD_GATEWAY, "Could not verify Firebase ID token");
+        } catch (RuntimeException e) {
+            throw new AuthException(HttpStatus.UNAUTHORIZED, "Invalid or expired Firebase ID token");
         }
     }
 
-    private static String text(JsonNode node, String field) {
-        JsonNode value = node.get(field);
-        return value == null || value.isNull() ? null : value.asText();
+    private JWKSource<SecurityContext> jwkSource() {
+        Instant now = Instant.now();
+        JWKSource<SecurityContext> cached = jwkSource;
+        if (cached != null && jwksFetchedAt.plusSeconds(JWKS_TTL_SECONDS).isAfter(now)) {
+            return cached;
+        }
+        synchronized (this) {
+            if (jwkSource != null && jwksFetchedAt.plusSeconds(JWKS_TTL_SECONDS).isAfter(Instant.now())) {
+                return jwkSource;
+            }
+            try {
+                String body = client.get().uri(URI.create(JWKS_URL)).retrieve().body(String.class);
+                if (body == null || body.isBlank()) {
+                    throw new AuthException(HttpStatus.BAD_GATEWAY, "Could not load Firebase signing keys");
+                }
+                JWKSet set = JWKSet.parse(body);
+                // Touch RSA material early so misconfigured responses fail here.
+                for (var key : set.getKeys()) {
+                    if (key instanceof RSAKey rsaKey) rsaKey.toRSAPublicKey();
+                }
+                jwkSource = new ImmutableJWKSet<>(set);
+                jwksFetchedAt = Instant.now();
+                return jwkSource;
+            } catch (AuthException e) {
+                throw e;
+            } catch (ParseException | com.nimbusds.jose.JOSEException | RestClientException e) {
+                throw new AuthException(HttpStatus.BAD_GATEWAY, "Could not load Firebase signing keys");
+            }
+        }
     }
 }

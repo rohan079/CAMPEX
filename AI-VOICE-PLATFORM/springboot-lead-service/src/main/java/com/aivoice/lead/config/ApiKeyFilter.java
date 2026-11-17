@@ -1,5 +1,6 @@
 package com.aivoice.lead.config;
 
+import com.aivoice.lead.service.AdminSessionService.AuthException;
 import com.aivoice.lead.service.DashboardAuthService;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -45,9 +46,13 @@ public class ApiKeyFilter extends OncePerRequestFilter {
                     reject(response, 503, "Firebase authentication is not configured");
                     return;
                 }
-            } else if (dashboardAuth.authenticate(request).isEmpty()) {
-                reject(response, 401, "Firebase authentication required");
-                return;
+            } else {
+                try {
+                    dashboardAuth.requireAuthenticated(request);
+                } catch (AuthException e) {
+                    reject(response, e.status().value(), e.getMessage());
+                    return;
+                }
             }
         }
         chain.doFilter(request, response);

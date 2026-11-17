@@ -5,11 +5,8 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 @ConfigurationProperties(prefix = "campex.firebase")
 public record FirebaseAuthProperties(String projectId, String apiKey) {
 
+    /** Server-side verification only needs the Firebase project id. */
     public boolean isConfigured() {
-        return notBlank(projectId) && notBlank(apiKey);
-    }
-
-    private static boolean notBlank(String value) {
-        return value != null && !value.isBlank();
+        return projectId != null && !projectId.isBlank();
     }
 }

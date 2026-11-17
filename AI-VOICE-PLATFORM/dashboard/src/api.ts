@@ -53,10 +53,6 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     } catch {
       message = response.statusText;
     }
-    if (response.status === 401) {
-      window.dispatchEvent(new Event("campex:auth-required"));
-      message = "Firebase authentication required. Sign in again to continue.";
-    }
     throw new ApiError(message || `Request failed (${response.status})`, response.status);
   }
   if (response.status === 204) return undefined as T;

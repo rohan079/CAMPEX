@@ -37,28 +37,36 @@ public class DashboardAuthService {
     }
 
     public Optional<AdminIdentity> authenticate(HttpServletRequest request) {
-        String idToken = bearerToken(request);
-        if (idToken == null || idToken.isBlank()) {
-            idToken = request.getParameter("id_token");
-        }
-        if (idToken == null || idToken.isBlank()) {
-            return Optional.empty();
-        }
         try {
-            VerifiedFirebaseUser user = firebaseTokens.verifyIdToken(idToken);
-            if (!sameEmail(user.email(), adminProperties.email())) {
-                return Optional.empty();
-            }
-            return Optional.of(new AdminIdentity(user.email(), Instant.now().plusSeconds(3600)));
+            return Optional.of(requireAuthenticated(request));
         } catch (AuthException e) {
             return Optional.empty();
         }
     }
 
+    public AdminIdentity requireAuthenticated(HttpServletRequest request) {
+        if (!isConfigured()) {
+            throw new AuthException(HttpStatus.SERVICE_UNAVAILABLE, "Firebase authentication is not configured");
+        }
+        String idToken = bearerToken(request);
+        if (idToken == null || idToken.isBlank()) {
+            idToken = request.getParameter("id_token");
+        }
+        if (idToken == null || idToken.isBlank()) {
+            throw new AuthException(HttpStatus.UNAUTHORIZED, "Firebase authentication required");
+        }
+
+        VerifiedFirebaseUser user = firebaseTokens.verifyIdToken(idToken);
+        if (!sameEmail(user.email(), adminProperties.email())) {
+            throw new AuthException(
+                    HttpStatus.FORBIDDEN,
+                    "Signed-in account is not authorized. Use the CAMPEX admin Google/Facebook email.");
+        }
+        return new AdminIdentity(user.email(), Instant.now().plusSeconds(3600));
+    }
+
     public String requireOwnerEmail(HttpServletRequest request) {
-        return authenticate(request)
-                .map(AdminIdentity::email)
-                .orElseThrow(() -> new AuthException(HttpStatus.UNAUTHORIZED, "Firebase authentication required"));
+        return requireAuthenticated(request).email();
     }
 
     private boolean hasAdminEmail() {

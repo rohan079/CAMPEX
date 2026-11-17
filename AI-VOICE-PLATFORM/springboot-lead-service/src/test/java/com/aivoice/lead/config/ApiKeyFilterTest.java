@@ -2,15 +2,17 @@ package com.aivoice.lead.config;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
 
 import com.aivoice.lead.service.AdminSessionService;
+import com.aivoice.lead.service.AdminSessionService.AuthException;
 import com.aivoice.lead.service.DashboardAuthService;
 import jakarta.servlet.FilterChain;
 import java.time.Instant;
-import java.util.Optional;
 import org.junit.jupiter.api.Test;
+import org.springframework.http.HttpStatus;
 import org.springframework.mock.web.MockFilterChain;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
@@ -22,10 +24,14 @@ class ApiKeyFilterTest {
         AppProperties properties = new AppProperties(environment, "Acme", "", "Asia/Kolkata", 7, 3,
                 popup, service, "", null, "http://localhost:8000", 30, 1);
         DashboardAuthService dashboardAuth = mock(DashboardAuthService.class);
-        when(dashboardAuth.isConfigured()).thenReturn(authConfigured);
-        when(dashboardAuth.authenticate(any())).thenReturn(authenticated
-                ? Optional.of(new AdminSessionService.AdminIdentity("admin@example.test", Instant.MAX))
-                : Optional.empty());
+        org.mockito.Mockito.when(dashboardAuth.isConfigured()).thenReturn(authConfigured);
+        if (authenticated) {
+            doReturn(new AdminSessionService.AdminIdentity("admin@example.test", Instant.MAX))
+                    .when(dashboardAuth).requireAuthenticated(any());
+        } else {
+            doThrow(new AuthException(HttpStatus.UNAUTHORIZED, "Firebase authentication required"))
+                    .when(dashboardAuth).requireAuthenticated(any());
+        }
         return new ApiKeyFilter(properties, dashboardAuth);
     }
 

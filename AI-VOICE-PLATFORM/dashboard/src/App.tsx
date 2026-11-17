@@ -3,7 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { AdminLogin } from "./AdminLogin";
 import { getAnalytics, getClients, getHealth, getLeadReviewStats } from "./api";
 import { auth } from "./firebase";
-import { signOutFirebase } from "./firebaseAuth";
+import { completeSocialRedirect, mapFirebaseAuthError, signOutFirebase } from "./firebaseAuth";
 import { CampaignStudio } from "./CampaignStudio";
 import { ChannelsPage } from "./ChannelsPage";
 import { ClientsPage } from "./ClientsPage";
@@ -45,22 +45,18 @@ export function App() {
   const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
+    let active = true;
+    void completeSocialRedirect().catch((err) => {
+      if (active) setAuthError(mapFirebaseAuthError(err));
+    });
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       setAuthState(user ? "authenticated" : "anonymous");
       if (user) setAuthError(null);
     });
-    return unsubscribe;
-  }, []);
-
-  useEffect(() => {
-    const onAuthRequired = () => {
-      void signOutFirebase().finally(() => {
-        setAuthError("Sign in again to continue.");
-        setAuthState("anonymous");
-      });
+    return () => {
+      active = false;
+      unsubscribe();
     };
-    window.addEventListener("campex:auth-required", onAuthRequired);
-    return () => window.removeEventListener("campex:auth-required", onAuthRequired);
   }, []);
 
   const currentClient = clients.find((client) => client.id === clientId);
@@ -158,7 +154,7 @@ export function App() {
     return <main className="admin-login-shell"><p>Checking sign-in…</p></main>;
   }
   if (authState === "anonymous") {
-    return <AdminLogin initialError={authError} onAuthenticated={() => { setAuthError(null); setAuthState("authenticated"); }} />;
+    return <AdminLogin initialError={authError} />;
   }
 
   return (

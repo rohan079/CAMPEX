@@ -1,7 +1,8 @@
 import {
   FacebookAuthProvider,
   GoogleAuthProvider,
-  signInWithPopup,
+  getRedirectResult,
+  signInWithRedirect,
   signOut,
   type UserCredential,
 } from "firebase/auth";
@@ -20,8 +21,13 @@ function providerFor(kind: SocialProvider) {
   return kind === "google" ? googleProvider : facebookProvider;
 }
 
-export async function signInWithSocial(kind: SocialProvider): Promise<UserCredential> {
-  return signInWithPopup(auth, providerFor(kind));
+/** Uses full-page redirect so Vercel COOP headers cannot break popup window.closed checks. */
+export async function signInWithSocial(kind: SocialProvider): Promise<void> {
+  await signInWithRedirect(auth, providerFor(kind));
+}
+
+export async function completeSocialRedirect(): Promise<UserCredential | null> {
+  return getRedirectResult(auth);
 }
 
 export async function signOutFirebase(): Promise<void> {
