@@ -54,6 +54,9 @@ AI-VOICE-PLATFORM/
 └── README.md
 ```
 
+Spring data schema extensions are applied with Flyway. V5 adds the single-admin/Meta OAuth tables; V6 converts their
+fixed-width hash columns to `VARCHAR(64)` to match Hibernate's entity mappings.
+
 ## Who owns what
 
 | Concern | Owner | Why |
