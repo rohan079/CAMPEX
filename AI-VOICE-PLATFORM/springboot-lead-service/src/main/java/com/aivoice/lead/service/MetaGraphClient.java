@@ -50,15 +50,22 @@ public class MetaGraphClient {
     public static class MetaGraphException extends RuntimeException {
         private final int httpStatus;
         private final int graphCode;
+        private final String failureType;
 
         public MetaGraphException(int httpStatus, int graphCode) {
+            this(httpStatus, graphCode, "unknown");
+        }
+
+        public MetaGraphException(int httpStatus, int graphCode, String failureType) {
             super("Meta Graph API request failed (HTTP " + httpStatus + ", code " + graphCode + ")");
             this.httpStatus = httpStatus;
             this.graphCode = graphCode;
+            this.failureType = failureType;
         }
 
         public int httpStatus() { return httpStatus; }
         public int graphCode() { return graphCode; }
+        public String failureType() { return failureType; }
     }
 
     public Token exchangeCode(String code) {
@@ -150,7 +157,7 @@ public class MetaGraphClient {
         URI uri = builder.build().encode().toUri();
         try {
             JsonNode body = client.method(method).uri(uri).retrieve().body(JsonNode.class);
-            if (body == null || body.isMissingNode()) throw new MetaGraphException(502, -1);
+            if (body == null || body.isMissingNode()) throw new MetaGraphException(502, -1, "empty_response");
             return body;
         } catch (RestClientResponseException e) {
             int graphCode = -1;
@@ -160,15 +167,15 @@ public class MetaGraphClient {
             } catch (IOException ignored) {
                 graphCode = -1;
             }
-            throw new MetaGraphException(e.getStatusCode().value(), graphCode);
+            throw new MetaGraphException(e.getStatusCode().value(), graphCode, "http_response");
         } catch (RestClientException e) {
-            throw new MetaGraphException(502, -1);
+            throw new MetaGraphException(502, -1, "transport_failure:" + e.getClass().getSimpleName());
         }
     }
 
     private static Token token(JsonNode body) {
         String value = body.path("access_token").asText("");
-        if (value.isBlank()) throw new MetaGraphException(502, -1);
+        if (value.isBlank()) throw new MetaGraphException(502, -1, "missing_access_token");
         long lifetime = body.path("expires_in").asLong(0);
         long dataLifetime = body.path("data_access_expiration_time").asLong(0);
         Instant now = Instant.now();

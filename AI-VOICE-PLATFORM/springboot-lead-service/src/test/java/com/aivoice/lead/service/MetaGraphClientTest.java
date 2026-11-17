@@ -6,10 +6,12 @@ import static org.springframework.test.web.client.match.MockRestRequestMatchers.
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.queryParam;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withBadRequest;
+import static org.springframework.test.web.client.response.MockRestResponseCreators.withException;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
 import com.aivoice.lead.config.MetaOAuthProperties;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.io.IOException;
 import java.time.Instant;
 import java.util.Base64;
 import java.util.List;
@@ -73,6 +75,24 @@ class MetaGraphClientTest {
                 MetaGraphClient.MetaGraphException.class,
                 () -> new MetaGraphClient(properties(), builder, new ObjectMapper()).revokeUserToken("expired-token"));
         assertEquals(190, error.graphCode());
+        server.verify();
+    }
+
+    @Test
+    void classifiesTransportFailuresWithoutExposingRequestDetails() {
+        RestClient.Builder builder = RestClient.builder();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        server.expect(requestTo(org.hamcrest.Matchers.startsWith(
+                        "https://graph.facebook.com/v27.0/oauth/access_token?")))
+                .andRespond(withException(new IOException("connection failed")));
+
+        MetaGraphClient.MetaGraphException error = org.junit.jupiter.api.Assertions.assertThrows(
+                MetaGraphClient.MetaGraphException.class,
+                () -> new MetaGraphClient(properties(), builder, new ObjectMapper()).exchangeCode("one-time-code"));
+
+        assertEquals(502, error.httpStatus());
+        assertEquals(-1, error.graphCode());
+        assertTrue(error.failureType().startsWith("transport_failure:"));
         server.verify();
     }
 

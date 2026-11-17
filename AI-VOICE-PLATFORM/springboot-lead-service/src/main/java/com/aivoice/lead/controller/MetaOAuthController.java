@@ -109,8 +109,8 @@ public class MetaOAuthController {
             log.warn("Meta OAuth permissions were not granted for admin {}", ownerEmail);
             return redirect("error", "permissions");
         } catch (MetaGraphException e) {
-            log.warn("Meta Graph OAuth exchange failed for admin {} (HTTP {}, code {})",
-                    ownerEmail, e.httpStatus(), e.graphCode());
+            log.warn("Meta Graph OAuth request failed (type {}, HTTP {}, code {})",
+                    e.failureType(), e.httpStatus(), e.graphCode());
             return redirect("error", e.graphCode() == 190 ? "expired_token" : "provider_error");
         } catch (IllegalStateException e) {
             log.error("Meta OAuth setup or token encryption failed for admin {}", ownerEmail);
