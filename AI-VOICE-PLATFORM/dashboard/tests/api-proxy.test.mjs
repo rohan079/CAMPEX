@@ -49,6 +49,35 @@ test("proxies OAuth routes, forwarding session cookies and Meta redirects", asyn
   }
 });
 
+test("reconstructs nested Vercel catch-all query paths for Meta status", async () => {
+  const previousUrl = process.env.CLIENT_SERVICE_URL;
+  const previousFetch = globalThis.fetch;
+  let sentUrl;
+  process.env.CLIENT_SERVICE_URL = "https://lead.example.test";
+  globalThis.fetch = async (url) => {
+    sentUrl = String(url);
+    return new Response('{"connected":false}', {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  };
+
+  try {
+    const response = responseRecorder();
+    await handler({
+      url: "/api/[...path]?...path=oauth%2Fmeta%2Fstatus",
+      method: "GET",
+      headers: { authorization: "Bearer token" },
+    }, response);
+    assert.equal(sentUrl, "https://lead.example.test/oauth/meta/status");
+    assert.equal(response.statusCode, 200);
+  } finally {
+    globalThis.fetch = previousFetch;
+    if (previousUrl === undefined) delete process.env.CLIENT_SERVICE_URL;
+    else process.env.CLIENT_SERVICE_URL = previousUrl;
+  }
+});
+
 test("proxies ordinary API paths unchanged and does not cache them", async () => {
   const previousUrl = process.env.CLIENT_SERVICE_URL;
   const previousFetch = globalThis.fetch;
