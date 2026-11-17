@@ -3,10 +3,39 @@ import { ApiError, disconnectMeta, getMetaConnection } from "./api";
 import type { MetaConnectionStatus } from "./api";
 import { auth } from "./firebase";
 
+const META_ERROR_MESSAGES: Record<string, string> = {
+  login_required: "Sign in with Google or Facebook again, then reconnect Meta.",
+  configuration: "Meta OAuth is not fully configured on the server. Check META_APP_ID, META_APP_SECRET, META_OAUTH_REDIRECT_URI, META_TOKEN_ENCRYPTION_KEY, and CAMPEX_FRONTEND_URL.",
+  invalid_state: "The Facebook login session expired or was invalid. Click Connect Facebook again.",
+  access_denied: "Facebook authorization was cancelled.",
+  provider_error: "Facebook rejected the token exchange. Confirm the Meta app redirect URI matches META_OAUTH_REDIRECT_URI exactly.",
+  missing_code: "Facebook did not return an authorization code.",
+  permissions: "Meta did not grant all requested permissions. Review the requested permissions and reconnect.",
+  expired_token: "The Facebook token expired. Reconnect.",
+  invalid_response: "Facebook returned an invalid response during connection.",
+};
+
 async function startMetaOAuth() {
   const token = await auth.currentUser?.getIdToken();
   if (!token) throw new Error("Sign in with Google or Facebook before connecting Meta");
-  window.location.assign(`/api/oauth/meta/login?id_token=${encodeURIComponent(token)}`);
+  const response = await fetch("/api/oauth/meta/login", {
+    headers: {
+      Accept: "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+  });
+  let detail = response.statusText;
+  try {
+    const body = await response.json() as { authorization_url?: string; detail?: string };
+    if (response.ok && body.authorization_url) {
+      window.location.assign(body.authorization_url);
+      return;
+    }
+    if (typeof body.detail === "string") detail = body.detail;
+  } catch {
+    // keep statusText
+  }
+  throw new Error(detail || `Could not start Facebook login (${response.status})`);
 }
 
 const CHANNELS = [
@@ -45,11 +74,10 @@ export function ChannelsPage() {
       setMetaNotice("Facebook account connected successfully.");
       setMetaNoticeError(false);
     } else if (result === "error") {
-      setMetaNotice(reason === "permissions"
-        ? "Meta did not grant all requested permissions. Review the requested permissions and reconnect."
-        : reason === "access_denied"
-          ? "Facebook authorization was cancelled."
-          : "Facebook could not complete the connection. Reconnect and try again.");
+      setMetaNotice(
+        (reason && META_ERROR_MESSAGES[reason])
+          || `Facebook could not complete the connection${reason ? ` (${reason})` : ""}. Reconnect and try again.`,
+      );
       setMetaNoticeError(true);
     }
     if (result) {

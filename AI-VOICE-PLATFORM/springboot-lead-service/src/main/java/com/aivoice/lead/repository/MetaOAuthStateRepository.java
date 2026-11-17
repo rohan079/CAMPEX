@@ -14,5 +14,5 @@ public interface MetaOAuthStateRepository extends JpaRepository<MetaOAuthState, 
     @Query("select state from MetaOAuthState state where state.stateHash = :stateHash")
     Optional<MetaOAuthState> lockByStateHash(@Param("stateHash") String stateHash);
 
-    long deleteByExpiresAtBefore(java.time.Instant now);
+    void deleteByExpiresAtBefore(java.time.Instant now);
 }

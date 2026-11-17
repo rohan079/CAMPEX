@@ -9,10 +9,12 @@ import com.aivoice.lead.service.MetaOAuthService;
 import com.aivoice.lead.service.MetaOAuthService.MissingPermissionsException;
 import com.aivoice.lead.service.MetaOAuthStateService;
 import java.net.URI;
+import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.CacheControl;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -43,22 +45,44 @@ public class MetaOAuthController {
         this.properties = properties;
     }
 
+    @GetMapping(value = "/login", produces = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<?> loginJson(jakarta.servlet.http.HttpServletRequest request) {
+        try {
+            URI authorizationUri = startAuthorization(request);
+            return ResponseEntity.ok()
+                    .cacheControl(CacheControl.noStore())
+                    .body(Map.of("authorization_url", authorizationUri.toString()));
+        } catch (AuthException e) {
+            return ResponseEntity.status(e.status())
+                    .cacheControl(CacheControl.noStore())
+                    .body(Map.of("detail", e.getMessage()));
+        } catch (IllegalStateException e) {
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                    .cacheControl(CacheControl.noStore())
+                    .body(Map.of("detail", "Meta OAuth is not fully configured on the server"));
+        }
+    }
+
     @GetMapping("/login")
     public ResponseEntity<Void> login(jakarta.servlet.http.HttpServletRequest request) {
-        final String ownerEmail;
         try {
-            ownerEmail = dashboardAuth.requireOwnerEmail(request);
+            return ResponseEntity.status(HttpStatus.FOUND)
+                    .location(startAuthorization(request))
+                    .cacheControl(CacheControl.noStore())
+                    .build();
         } catch (AuthException e) {
             return redirect("error", "login_required");
-        }
-        if (!meta.isConfigured()) {
+        } catch (IllegalStateException e) {
             return redirect("error", "configuration");
         }
-        String state = states.create(ownerEmail);
-        return ResponseEntity.status(HttpStatus.FOUND)
-                .location(meta.authorizationUri(state))
-                .cacheControl(CacheControl.noStore())
-                .build();
+    }
+
+    private URI startAuthorization(jakarta.servlet.http.HttpServletRequest request) {
+        String ownerEmail = dashboardAuth.requireOwnerEmail(request);
+        if (!meta.isConfigured()) {
+            throw new IllegalStateException("Meta OAuth is not fully configured on the server");
+        }
+        return meta.authorizationUri(states.create(ownerEmail));
     }
 
     @GetMapping("/callback")
