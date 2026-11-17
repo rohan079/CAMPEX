@@ -38,7 +38,7 @@ export default async function handler(req, res) {
   const incoming = new URL(req.url || "/", "https://vercel.invalid");
   const upstream = new URL(backendPath(incoming.pathname) + incoming.search, backend.origin);
   const headers = new Headers();
-  for (const name of ["accept", "content-type", "cookie", "x-ad-popup-token"]) {
+  for (const name of ["accept", "authorization", "content-type", "cookie", "x-ad-popup-token"]) {
     const value = req.headers[name];
     if (typeof value === "string") headers.set(name, value);
   }

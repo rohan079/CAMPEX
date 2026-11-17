@@ -5,6 +5,8 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import com.aivoice.lead.service.AdminSessionService;
+import com.aivoice.lead.service.DashboardAuthService;
 import jakarta.servlet.FilterChain;
 import java.time.Instant;
 import java.util.Optional;
@@ -12,7 +14,6 @@ import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockFilterChain;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
-import com.aivoice.lead.service.AdminSessionService;
 
 class ApiKeyFilterTest {
 
@@ -20,12 +21,12 @@ class ApiKeyFilterTest {
                                 boolean authConfigured, boolean authenticated) {
         AppProperties properties = new AppProperties(environment, "Acme", "", "Asia/Kolkata", 7, 3,
                 popup, service, "", null, "http://localhost:8000", 30, 1);
-        AdminSessionService sessions = mock(AdminSessionService.class);
-        when(sessions.isConfigured()).thenReturn(authConfigured);
-        when(sessions.authenticate(any())).thenReturn(authenticated
+        DashboardAuthService dashboardAuth = mock(DashboardAuthService.class);
+        when(dashboardAuth.isConfigured()).thenReturn(authConfigured);
+        when(dashboardAuth.authenticate(any())).thenReturn(authenticated
                 ? Optional.of(new AdminSessionService.AdminIdentity("admin@example.test", Instant.MAX))
                 : Optional.empty());
-        return new ApiKeyFilter(properties, sessions);
+        return new ApiKeyFilter(properties, dashboardAuth);
     }
 
     private int status(ApiKeyFilter filter, String method, String path, String header, String value) throws Exception {
@@ -40,7 +41,7 @@ class ApiKeyFilterTest {
     }
 
     @Test
-    void dashboardNeedsAnAdminSessionAndOtherCallersNeedTheirOwnKeys() throws Exception {
+    void dashboardNeedsFirebaseAuthAndOtherCallersNeedTheirOwnKeys() throws Exception {
         ApiKeyFilter filter = filter("production", "popup", "svc", true, true);
         ApiKeyFilter unauthenticated = filter("production", "popup", "svc", true, false);
         assertEquals(401, status(unauthenticated, "GET", "/api/leads", null, null));

@@ -1,8 +1,8 @@
 package com.aivoice.lead.controller;
 
 import com.aivoice.lead.config.MetaOAuthProperties;
-import com.aivoice.lead.service.AdminSessionService;
 import com.aivoice.lead.service.AdminSessionService.AuthException;
+import com.aivoice.lead.service.DashboardAuthService;
 import com.aivoice.lead.service.MetaGraphClient.MetaGraphException;
 import com.aivoice.lead.service.MetaConnectionStore.ConnectionStatus;
 import com.aivoice.lead.service.MetaOAuthService;
@@ -27,17 +27,17 @@ import org.springframework.web.util.UriComponentsBuilder;
 public class MetaOAuthController {
 
     private static final Logger log = LoggerFactory.getLogger(MetaOAuthController.class);
-    private final AdminSessionService sessions;
+    private final DashboardAuthService dashboardAuth;
     private final MetaOAuthStateService states;
     private final MetaOAuthService meta;
     private final MetaOAuthProperties properties;
 
     public MetaOAuthController(
-            AdminSessionService sessions,
+            DashboardAuthService dashboardAuth,
             MetaOAuthStateService states,
             MetaOAuthService meta,
             MetaOAuthProperties properties) {
-        this.sessions = sessions;
+        this.dashboardAuth = dashboardAuth;
         this.states = states;
         this.meta = meta;
         this.properties = properties;
@@ -47,7 +47,7 @@ public class MetaOAuthController {
     public ResponseEntity<Void> login(jakarta.servlet.http.HttpServletRequest request) {
         final String ownerEmail;
         try {
-            ownerEmail = sessions.requireOwnerEmail(request);
+            ownerEmail = dashboardAuth.requireOwnerEmail(request);
         } catch (AuthException e) {
             return redirect("error", "login_required");
         }
@@ -99,12 +99,12 @@ public class MetaOAuthController {
 
     @GetMapping("/status")
     public ConnectionStatus status(jakarta.servlet.http.HttpServletRequest request) {
-        return meta.status(sessions.requireOwnerEmail(request));
+        return meta.status(dashboardAuth.requireOwnerEmail(request));
     }
 
     @DeleteMapping("/connection")
     public ResponseEntity<Void> disconnect(jakarta.servlet.http.HttpServletRequest request) {
-        meta.disconnect(sessions.requireOwnerEmail(request));
+        meta.disconnect(dashboardAuth.requireOwnerEmail(request));
         return ResponseEntity.noContent().cacheControl(CacheControl.noStore()).build();
     }
 

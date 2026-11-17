@@ -52,6 +52,17 @@ export function App() {
     return unsubscribe;
   }, []);
 
+  useEffect(() => {
+    const onAuthRequired = () => {
+      void signOutFirebase().finally(() => {
+        setAuthError("Sign in again to continue.");
+        setAuthState("anonymous");
+      });
+    };
+    window.addEventListener("campex:auth-required", onAuthRequired);
+    return () => window.removeEventListener("campex:auth-required", onAuthRequired);
+  }, []);
+
   const currentClient = clients.find((client) => client.id === clientId);
   const scopeName = currentClient?.name ?? "All clients";
   const meta = PAGE_META[view];

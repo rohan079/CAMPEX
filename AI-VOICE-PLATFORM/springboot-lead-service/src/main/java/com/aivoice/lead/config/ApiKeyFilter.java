@@ -1,6 +1,6 @@
 package com.aivoice.lead.config;
 
-import com.aivoice.lead.service.AdminSessionService;
+import com.aivoice.lead.service.DashboardAuthService;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -11,16 +11,16 @@ import java.security.MessageDigest;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
-/** Checks the popup and internal service keys; the dashboard uses a CAMPEX admin session. */
+/** Checks the popup and internal service keys; the dashboard uses Firebase ID tokens. */
 @Component
 public class ApiKeyFilter extends OncePerRequestFilter {
 
     private final AppProperties props;
-    private final AdminSessionService adminSessions;
+    private final DashboardAuthService dashboardAuth;
 
-    public ApiKeyFilter(AppProperties props, AdminSessionService adminSessions) {
+    public ApiKeyFilter(AppProperties props, DashboardAuthService dashboardAuth) {
         this.props = props;
-        this.adminSessions = adminSessions;
+        this.dashboardAuth = dashboardAuth;
     }
 
     @Override
@@ -40,13 +40,13 @@ public class ApiKeyFilter extends OncePerRequestFilter {
                 return;
             }
         } else if (path.startsWith("/api/")) {
-            if (!adminSessions.isConfigured()) {
+            if (!dashboardAuth.isConfigured()) {
                 if (!props.isDevelopment()) {
-                    reject(response, 503, "CAMPEX admin authentication is not configured");
+                    reject(response, 503, "Firebase authentication is not configured");
                     return;
                 }
-            } else if (adminSessions.authenticate(request).isEmpty()) {
-                reject(response, 401, "CAMPEX admin login required");
+            } else if (dashboardAuth.authenticate(request).isEmpty()) {
+                reject(response, 401, "Firebase authentication required");
                 return;
             }
         }

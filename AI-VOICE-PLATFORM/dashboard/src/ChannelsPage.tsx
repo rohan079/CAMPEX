@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
 import { ApiError, disconnectMeta, getMetaConnection } from "./api";
 import type { MetaConnectionStatus } from "./api";
+import { auth } from "./firebase";
+
+async function startMetaOAuth() {
+  const token = await auth.currentUser?.getIdToken();
+  if (!token) throw new Error("Sign in with Google or Facebook before connecting Meta");
+  window.location.assign(`/api/oauth/meta/login?id_token=${encodeURIComponent(token)}`);
+}
 
 const CHANNELS = [
   { id: "instagram", mark: "◎", name: "Instagram", need: "Professional account linked to a Facebook Page and Instagram Graph API permissions.", tone: "instagram" },
@@ -96,7 +103,7 @@ export function ChannelsPage() {
               <small>{metaConnection.expired ? "Access expired — reconnect required" : `Connected${metaConnection.token_expires_at ? ` · expires ${new Date(metaConnection.token_expires_at).toLocaleDateString()}` : ""}`}</small>
             </div>
             <div className="meta-actions">
-              <button type="button" className="secondary-button" onClick={() => window.location.assign("/api/oauth/meta/login")}>Reconnect</button>
+              <button type="button" className="secondary-button" onClick={() => void startMetaOAuth().catch((err) => setMetaError(err instanceof Error ? err.message : "Could not start Facebook login"))}>Reconnect</button>
               <button type="button" className="secondary-button" disabled={metaBusy} onClick={() => void disconnectFacebook()}>{metaBusy ? "Disconnecting…" : "Disconnect"}</button>
             </div>
           </div>
@@ -110,7 +117,7 @@ export function ChannelsPage() {
           </div>
         </> : <div className="meta-connect-actions">
           <p className="hint">The Meta token remains encrypted in the backend and is never sent to this page.</p>
-          <button type="button" className="primary-button" onClick={() => window.location.assign("/api/oauth/meta/login")}>Connect Facebook</button>
+          <button type="button" className="primary-button" onClick={() => void startMetaOAuth().catch((err) => setMetaError(err instanceof Error ? err.message : "Could not start Facebook login"))}>Connect Facebook</button>
         </div>}
       </section>
 

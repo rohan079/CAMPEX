@@ -1,3 +1,4 @@
+import { auth } from "./firebase";
 import type {
   CallPage,
   CampaignAssistRequest,
@@ -26,9 +27,18 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+async function authHeaders(init?: RequestInit): Promise<Headers> {
   const headers = new Headers(init?.headers);
   if (init?.body) headers.set("Content-Type", "application/json");
+  const user = auth.currentUser;
+  if (user) {
+    headers.set("Authorization", `Bearer ${await user.getIdToken()}`);
+  }
+  return headers;
+}
+
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const headers = await authHeaders(init);
   let response: Response;
   try {
     response = await fetch(path, { ...init, headers, credentials: "same-origin" });
@@ -42,6 +52,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       if (typeof body.detail === "string") message = body.detail;
     } catch {
       message = response.statusText;
+    }
+    if (response.status === 401) {
+      window.dispatchEvent(new Event("campex:auth-required"));
+      message = "Firebase authentication required. Sign in again to continue.";
     }
     throw new ApiError(message || `Request failed (${response.status})`, response.status);
   }
