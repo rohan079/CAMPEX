@@ -2,6 +2,7 @@ import {
   FacebookAuthProvider,
   GoogleAuthProvider,
   getRedirectResult,
+  signInWithPopup,
   signInWithRedirect,
   signOut,
   type UserCredential,
@@ -9,6 +10,8 @@ import {
 import { auth } from "./firebase";
 
 export type SocialProvider = "google" | "facebook";
+
+const AUTH_ERROR_KEY = "campex.authError";
 
 const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({ prompt: "select_account" });
@@ -21,13 +24,53 @@ function providerFor(kind: SocialProvider) {
   return kind === "google" ? googleProvider : facebookProvider;
 }
 
-/** Uses full-page redirect so Vercel COOP headers cannot break popup window.closed checks. */
-export async function signInWithSocial(kind: SocialProvider): Promise<void> {
-  await signInWithRedirect(auth, providerFor(kind));
+/**
+ * Prefer popup (works with COOP same-origin-allow-popups). Fall back to redirect
+ * only when the popup path is blocked.
+ */
+export async function signInWithSocial(kind: SocialProvider): Promise<UserCredential | void> {
+  const provider = providerFor(kind);
+  try {
+    return await signInWithPopup(auth, provider);
+  } catch (err) {
+    const code = typeof err === "object" && err && "code" in err ? String((err as { code: unknown }).code) : "";
+    if (
+      code === "auth/popup-blocked"
+      || code === "auth/popup-closed-by-user"
+      || code === "auth/cancelled-popup-request"
+    ) {
+      // Closed-by-user should not force redirect; only blocked popups should.
+      if (code === "auth/popup-blocked") {
+        await signInWithRedirect(auth, provider);
+        return;
+      }
+    }
+    // COOP / missing window.closed support often surfaces as an internal error —
+    // fall back to redirect so login can still complete.
+    if (code === "auth/internal-error" || /cross-origin-opener-policy|window\.closed/i.test(String(err))) {
+      await signInWithRedirect(auth, provider);
+      return;
+    }
+    throw err;
+  }
 }
 
+/** Must run once on startup before React mounts so redirect state is not lost. */
 export async function completeSocialRedirect(): Promise<UserCredential | null> {
-  return getRedirectResult(auth);
+  try {
+    const result = await getRedirectResult(auth);
+    if (result?.user) sessionStorage.removeItem(AUTH_ERROR_KEY);
+    return result;
+  } catch (err) {
+    sessionStorage.setItem(AUTH_ERROR_KEY, mapFirebaseAuthError(err));
+    throw err;
+  }
+}
+
+export function consumeStoredAuthError(): string | null {
+  const value = sessionStorage.getItem(AUTH_ERROR_KEY);
+  if (value) sessionStorage.removeItem(AUTH_ERROR_KEY);
+  return value;
 }
 
 export async function signOutFirebase(): Promise<void> {

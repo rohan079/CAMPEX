@@ -1,6 +1,12 @@
 import { initializeApp, type FirebaseApp } from "firebase/app";
 import { getAnalytics, isSupported, type Analytics } from "firebase/analytics";
-import { getAuth, type Auth } from "firebase/auth";
+import {
+  browserLocalPersistence,
+  browserPopupRedirectResolver,
+  getAuth,
+  initializeAuth,
+  type Auth,
+} from "firebase/auth";
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY || "AIzaSyC3n37TnL-AQYFoj59eId6k7d9rb_pQp9A",
@@ -13,7 +19,19 @@ const firebaseConfig = {
 };
 
 const app: FirebaseApp = initializeApp(firebaseConfig);
-export const auth: Auth = getAuth(app);
+
+function createAuth(): Auth {
+  try {
+    return initializeAuth(app, {
+      persistence: browserLocalPersistence,
+      popupRedirectResolver: browserPopupRedirectResolver,
+    });
+  } catch {
+    return getAuth(app);
+  }
+}
+
+export const auth: Auth = createAuth();
 
 let analytics: Analytics | null = null;
 void isSupported()

@@ -1,7 +1,13 @@
 import { useState } from "react";
 import { mapFirebaseAuthError, signInWithSocial, type SocialProvider } from "./firebaseAuth";
 
-export function AdminLogin({ initialError }: { initialError?: string | null }) {
+export function AdminLogin({
+  onAuthenticated,
+  initialError,
+}: {
+  onAuthenticated: () => void;
+  initialError?: string | null;
+}) {
   const [busy, setBusy] = useState<SocialProvider | null>(null);
   const [error, setError] = useState<string | null>(initialError ?? null);
 
@@ -9,8 +15,9 @@ export function AdminLogin({ initialError }: { initialError?: string | null }) {
     setBusy(provider);
     setError(null);
     try {
-      // Navigates away to Google/Facebook, then back to this app.
-      await signInWithSocial(provider);
+      const result = await signInWithSocial(provider);
+      // Popup path returns a credential; redirect path navigates away.
+      if (result?.user) onAuthenticated();
     } catch (err) {
       setError(mapFirebaseAuthError(err));
       setBusy(null);
@@ -33,7 +40,7 @@ export function AdminLogin({ initialError }: { initialError?: string | null }) {
             onClick={() => void socialSignIn("google")}
           >
             <span className="social-mark" aria-hidden="true">G</span>
-            {busy === "google" ? "Redirecting to Google…" : "Continue with Google"}
+            {busy === "google" ? "Connecting Google…" : "Continue with Google"}
           </button>
           <button
             type="button"
@@ -42,7 +49,7 @@ export function AdminLogin({ initialError }: { initialError?: string | null }) {
             onClick={() => void socialSignIn("facebook")}
           >
             <span className="social-mark" aria-hidden="true">f</span>
-            {busy === "facebook" ? "Redirecting to Facebook…" : "Continue with Facebook"}
+            {busy === "facebook" ? "Connecting Facebook…" : "Continue with Facebook"}
           </button>
         </div>
 

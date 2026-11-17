@@ -3,7 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { AdminLogin } from "./AdminLogin";
 import { getAnalytics, getClients, getHealth, getLeadReviewStats } from "./api";
 import { auth } from "./firebase";
-import { completeSocialRedirect, mapFirebaseAuthError, signOutFirebase } from "./firebaseAuth";
+import { consumeStoredAuthError, signOutFirebase } from "./firebaseAuth";
 import { CampaignStudio } from "./CampaignStudio";
 import { ChannelsPage } from "./ChannelsPage";
 import { ClientsPage } from "./ClientsPage";
@@ -45,10 +45,12 @@ export function App() {
   const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
+    const stored = consumeStoredAuthError();
+    if (stored) setAuthError(stored);
+  }, []);
+
+  useEffect(() => {
     let active = true;
-    void completeSocialRedirect().catch((err) => {
-      if (active) setAuthError(mapFirebaseAuthError(err));
-    });
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       if (!active) return;
       if (!user) {
@@ -169,7 +171,13 @@ export function App() {
     return <main className="admin-login-shell"><p>Checking sign-in…</p></main>;
   }
   if (authState === "anonymous") {
-    return <AdminLogin initialError={authError} />;
+    return <AdminLogin
+      initialError={authError}
+      onAuthenticated={() => {
+        setAuthError(null);
+        setAuthState("authenticated");
+      }}
+    />;
   }
 
   return (
