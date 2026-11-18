@@ -315,7 +315,7 @@ WHATSAPP_GRAPH_API_VERSION=your-supported-graph-api-version
 META_APP_ID=your-meta-app-id
 META_OAUTH_REDIRECT_URI=https://campex-production.up.railway.app/oauth/meta/callback
 META_GRAPH_API_VERSION=v27.0
-META_OAUTH_SCOPES=ads_management,ads_read,business_management,pages_show_list,pages_read_engagement
+META_OAUTH_SCOPES=ads_management,ads_read,business_management,pages_show_list,pages_read_engagement,instagram_basic,instagram_manage_insights
 META_TOKEN_ENCRYPTION_KEY=<base64-encoded-32-byte-key>
 CAMPEX_FRONTEND_URL=https://campexdashboard.vercel.app
 AD_POPUP_TOKEN=use-a-separate-random-secret
@@ -346,7 +346,7 @@ and [voice-service env template](./infrastructure/voice-service.env.example) for
 ### Meta OAuth setup
 
 The backend requests `ads_management`, `ads_read`, `business_management`, `pages_show_list`, and
-`pages_read_engagement`. The configured Graph API version is **v27.0**, the latest version listed in [Meta's Graph API
+`pages_read_engagement`, `instagram_basic`, and `instagram_manage_insights`. The configured Graph API version is **v27.0**, the latest version listed in [Meta's Graph API
 changelog](https://developers.facebook.com/documentation/development/graph-api/changelog/) on 2026-11-16. In Meta's App Dashboard:
 
 1. Add the Facebook Login product and configure web OAuth login.

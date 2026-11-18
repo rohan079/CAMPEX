@@ -34,6 +34,9 @@ public class MetaConnectionStore {
     public record AdAccountInfo(String id, String name, String accountId, Integer accountStatus, String currency) {
     }
 
+    public record InstagramAccountInfo(String id, String name, String username, String pageId) {
+    }
+
     public record ConnectionStatus(
             boolean connected,
             boolean expired,
@@ -41,7 +44,8 @@ public class MetaConnectionStore {
             Instant connectedAt,
             Instant tokenExpiresAt,
             List<PageInfo> pages,
-            List<AdAccountInfo> adAccounts) {
+            List<AdAccountInfo> adAccounts,
+            List<InstagramAccountInfo> instagramAccounts) {
     }
 
     public boolean encryptionConfigured() {
@@ -60,7 +64,8 @@ public class MetaConnectionStore {
     @Transactional
     public void save(String ownerEmail, MetaGraphClient.Profile profile, MetaGraphClient.Token token,
                      List<String> grantedScopes, List<MetaGraphClient.Page> pages,
-                     List<MetaGraphClient.AdAccount> adAccounts) {
+                     List<MetaGraphClient.AdAccount> adAccounts,
+                     List<MetaGraphClient.InstagramAccount> instagramAccounts) {
         String normalizedOwner = ownerEmail.toLowerCase(Locale.ROOT);
         MetaConnection connection = connections.findByOwnerEmail(normalizedOwner).orElseGet(MetaConnection::new);
         connection.setOwnerEmail(normalizedOwner);
@@ -76,7 +81,8 @@ public class MetaConnectionStore {
 
         UUID connectionId = connection.getId();
         assets.deleteAllByConnectionId(connectionId);
-        List<MetaConnectedAsset> stored = new ArrayList<>(pages.size() + adAccounts.size());
+        List<MetaConnectedAsset> stored = new ArrayList<>(
+                pages.size() + adAccounts.size() + instagramAccounts.size());
         for (MetaGraphClient.Page page : pages) {
             MetaConnectedAsset asset = new MetaConnectedAsset();
             asset.setConnectionId(connectionId);
@@ -103,13 +109,25 @@ public class MetaConnectionStore {
             asset.setCurrency(account.currency());
             stored.add(asset);
         }
+        for (MetaGraphClient.InstagramAccount account : instagramAccounts) {
+            MetaConnectedAsset asset = new MetaConnectedAsset();
+            asset.setConnectionId(connectionId);
+            asset.setAssetType("instagram");
+            asset.setExternalId(account.id());
+            asset.setName(account.name());
+            asset.setAccountId(account.username());
+            asset.setCategory(account.pageId());
+            stored.add(asset);
+        }
         if (!stored.isEmpty()) assets.saveAll(stored);
     }
 
     @Transactional(readOnly = true)
     public ConnectionStatus status(String ownerEmail) {
         MetaConnection connection = connections.findByOwnerEmail(ownerEmail.toLowerCase(Locale.ROOT)).orElse(null);
-        if (connection == null) return new ConnectionStatus(false, false, null, null, null, List.of(), List.of());
+        if (connection == null) {
+            return new ConnectionStatus(false, false, null, null, null, List.of(), List.of(), List.of());
+        }
         List<MetaConnectedAsset> currentAssets = assets.findAllByConnectionIdOrderByAssetTypeAscNameAsc(connection.getId());
         List<PageInfo> pages = currentAssets.stream()
                 .filter(asset -> "page".equals(asset.getAssetType()))
@@ -120,11 +138,19 @@ public class MetaConnectionStore {
                 .map(asset -> new AdAccountInfo(asset.getExternalId(), asset.getName(), asset.getAccountId(),
                         asset.getAccountStatus(), asset.getCurrency()))
                 .toList();
+        List<InstagramAccountInfo> instagramAccounts = currentAssets.stream()
+                .filter(asset -> "instagram".equals(asset.getAssetType()))
+                .map(asset -> new InstagramAccountInfo(
+                        asset.getExternalId(),
+                        asset.getName(),
+                        asset.getAccountId(),
+                        asset.getCategory()))
+                .toList();
         Instant now = Instant.now();
         boolean expired = isExpired(connection.getTokenExpiresAt(), now)
                 || isExpired(connection.getDataAccessExpiresAt(), now);
         return new ConnectionStatus(true, expired, connection.getMetaUserName(), connection.getConnectedAt(),
-                connection.getTokenExpiresAt(), pages, adAccounts);
+                connection.getTokenExpiresAt(), pages, adAccounts, instagramAccounts);
     }
 
     @Transactional

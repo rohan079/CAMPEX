@@ -11,6 +11,9 @@ type Draft = {
   objective: Objective;
   platforms: CampaignPlatform[];
   language: LanguageCode;
+  location: string;
+  ageMin: number;
+  ageMax: number;
   headline: string;
   body: string;
   cta: string;
@@ -19,7 +22,9 @@ type Draft = {
 };
 type AssistantMessage = { role: "assistant" | "user"; content: string };
 
-const STORAGE_KEY = "campaign-studio.drafts.v1";
+const STORAGE_KEY = "campaign-studio.drafts.v2";
+const AGE_MIN_FLOOR = 18;
+const AGE_MAX_CEILING = 65;
 const CHANNELS: Array<{ id: CampaignPlatform; mark: string; label: string; detail: string; color: string }> = [
   { id: "facebook", mark: "f", label: "Facebook", detail: "Feed and stories", color: "facebook" },
   { id: "instagram", mark: "◎", label: "Instagram", detail: "Feed, stories and reels", color: "instagram" },
@@ -35,10 +40,44 @@ const INITIAL_MESSAGES: AssistantMessage[] = [
   },
 ];
 
+function clampAge(value: number, fallback: number): number {
+  if (!Number.isFinite(value)) return fallback;
+  return Math.min(AGE_MAX_CEILING, Math.max(AGE_MIN_FLOOR, Math.round(value)));
+}
+
+function normalizeDraft(raw: Partial<Draft> & { id?: string }): Draft | null {
+  if (!raw || typeof raw.id !== "string" || !raw.id) return null;
+  const ageMin = clampAge(Number(raw.ageMin ?? AGE_MIN_FLOOR), AGE_MIN_FLOOR);
+  let ageMax = clampAge(Number(raw.ageMax ?? AGE_MAX_CEILING), AGE_MAX_CEILING);
+  if (ageMax < ageMin) ageMax = ageMin;
+  return {
+    id: raw.id,
+    clientId: typeof raw.clientId === "string" ? raw.clientId : "",
+    name: typeof raw.name === "string" ? raw.name : "",
+    objective: (raw.objective as Objective) || "leads",
+    platforms: Array.isArray(raw.platforms) ? raw.platforms as CampaignPlatform[] : ["facebook", "instagram"],
+    language: (raw.language as LanguageCode) || "en",
+    location: typeof raw.location === "string" ? raw.location : "",
+    ageMin,
+    ageMax,
+    headline: typeof raw.headline === "string" ? raw.headline : "",
+    body: typeof raw.body === "string" ? raw.body : "",
+    cta: typeof raw.cta === "string" ? raw.cta : "Learn more",
+    imageName: typeof raw.imageName === "string" ? raw.imageName : "",
+    savedAt: typeof raw.savedAt === "string" ? raw.savedAt : new Date().toISOString(),
+  };
+}
+
 function readDrafts(): Draft[] {
   try {
-    const value: unknown = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "[]");
-    return Array.isArray(value) ? value as Draft[] : [];
+    const keys = [STORAGE_KEY, "campaign-studio.drafts.v1"];
+    for (const key of keys) {
+      const value: unknown = JSON.parse(localStorage.getItem(key) ?? "null");
+      if (!Array.isArray(value)) continue;
+      const drafts = value.map((item) => normalizeDraft(item as Partial<Draft>)).filter((item): item is Draft => item !== null);
+      if (drafts.length || key === STORAGE_KEY) return drafts;
+    }
+    return [];
   } catch {
     return [];
   }
@@ -62,6 +101,9 @@ export function CampaignStudio({
   const [objective, setObjective] = useState<Objective>("leads");
   const [platforms, setPlatforms] = useState<CampaignPlatform[]>(["facebook", "instagram"]);
   const [language, setLanguage] = useState<LanguageCode>("en");
+  const [location, setLocation] = useState("");
+  const [ageMin, setAgeMin] = useState(AGE_MIN_FLOOR);
+  const [ageMax, setAgeMax] = useState(AGE_MAX_CEILING);
   const [headline, setHeadline] = useState("");
   const [body, setBody] = useState("");
   const [cta, setCta] = useState("Learn more");
@@ -133,6 +175,16 @@ export function CampaignStudio({
       setError("Add a campaign name, select at least one channel, and write the ad copy.");
       return;
     }
+    if (!location.trim()) {
+      setError("Add a target location for the campaign audience.");
+      return;
+    }
+    const nextAgeMin = clampAge(ageMin, AGE_MIN_FLOOR);
+    const nextAgeMax = clampAge(ageMax, AGE_MAX_CEILING);
+    if (nextAgeMax < nextAgeMin) {
+      setError("Maximum age must be greater than or equal to minimum age.");
+      return;
+    }
     const id = draftId ?? crypto.randomUUID();
     const draft: Draft = {
       id,
@@ -141,6 +193,9 @@ export function CampaignStudio({
       objective,
       platforms,
       language,
+      location: location.trim(),
+      ageMin: nextAgeMin,
+      ageMax: nextAgeMax,
       headline: headline.trim(),
       body: body.trim(),
       cta,
@@ -160,6 +215,9 @@ export function CampaignStudio({
     setObjective(draft.objective);
     setPlatforms(draft.platforms);
     setLanguage(draft.language);
+    setLocation(draft.location);
+    setAgeMin(draft.ageMin);
+    setAgeMax(draft.ageMax);
     setHeadline(draft.headline);
     setBody(draft.body);
     setCta(draft.cta);
@@ -207,6 +265,9 @@ export function CampaignStudio({
     setObjective("leads");
     setPlatforms(["facebook", "instagram"]);
     setLanguage("en");
+    setLocation("");
+    setAgeMin(AGE_MIN_FLOOR);
+    setAgeMax(AGE_MAX_CEILING);
     setHeadline("");
     setBody("");
     setCta("Learn more");
@@ -276,6 +337,47 @@ export function CampaignStudio({
                 );
               })}
             </div>
+            <div className="section-title-row compact-title">
+              <div>
+                <p className="step-label">02B · AUDIENCE</p>
+                <h3>Location and age</h3>
+              </div>
+              <span className="muted-label">{ageMin}–{ageMax} yrs</span>
+            </div>
+            <div className="form-two-col targeting-grid">
+              <label className="form-field">
+                <span>Target location</span>
+                <input
+                  value={location}
+                  onChange={(event) => setLocation(event.target.value)}
+                  maxLength={160}
+                  placeholder="e.g. Vijayawada, Andhra Pradesh"
+                />
+              </label>
+              <div className="age-range-fields">
+                <label className="form-field">
+                  <span>Min age</span>
+                  <input
+                    type="number"
+                    min={AGE_MIN_FLOOR}
+                    max={AGE_MAX_CEILING}
+                    value={ageMin}
+                    onChange={(event) => setAgeMin(clampAge(Number(event.target.value), AGE_MIN_FLOOR))}
+                  />
+                </label>
+                <label className="form-field">
+                  <span>Max age</span>
+                  <input
+                    type="number"
+                    min={AGE_MIN_FLOOR}
+                    max={AGE_MAX_CEILING}
+                    value={ageMax}
+                    onChange={(event) => setAgeMax(clampAge(Number(event.target.value), AGE_MAX_CEILING))}
+                  />
+                </label>
+              </div>
+            </div>
+            <p className="targeting-note">Audience targeting is stored with the draft for Meta/Instagram campaigns. Live delivery still requires a connected ad account.</p>
           </section>
 
           <section className="surface-card">
@@ -404,7 +506,7 @@ export function CampaignStudio({
                   <li key={draft.id}>
                     <button type="button" className="draft-open" onClick={() => loadDraft(draft)}>
                       <span className="draft-thumb">{draft.imageName ? "▧" : "✦"}</span>
-                      <span><strong>{draft.name}</strong><small>{draft.platforms.length} channels · {new Date(draft.savedAt).toLocaleDateString()}</small></span>
+                      <span><strong>{draft.name}</strong><small>{draft.platforms.length} channels · {draft.location || "No location"} · {draft.ageMin}–{draft.ageMax} · {new Date(draft.savedAt).toLocaleDateString()}</small></span>
                     </button>
                     <button type="button" className="draft-delete" aria-label={`Delete ${draft.name}`} onClick={() => setDrafts((current) => current.filter((item) => item.id !== draft.id))}>×</button>
                   </li>

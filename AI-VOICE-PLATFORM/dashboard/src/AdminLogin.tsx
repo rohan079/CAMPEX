@@ -1,5 +1,12 @@
 import { useState } from "react";
-import { mapFirebaseAuthError, signInWithSocial, type SocialProvider } from "./firebaseAuth";
+import type { FormEvent } from "react";
+import {
+  mapFirebaseAuthError,
+  registerWithEmailPassword,
+  signInWithEmailPassword,
+  signInWithSocial,
+  type SocialProvider,
+} from "./firebaseAuth";
 
 export function AdminLogin({
   onAuthenticated,
@@ -8,7 +15,10 @@ export function AdminLogin({
   onAuthenticated: () => void;
   initialError?: string | null;
 }) {
-  const [busy, setBusy] = useState<SocialProvider | null>(null);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [mode, setMode] = useState<"signin" | "register">("signin");
+  const [busy, setBusy] = useState<"password" | SocialProvider | null>(null);
   const [error, setError] = useState<string | null>(initialError ?? null);
 
   async function socialSignIn(provider: SocialProvider) {
@@ -16,10 +26,29 @@ export function AdminLogin({
     setError(null);
     try {
       const result = await signInWithSocial(provider);
-      // Popup path returns a credential; redirect path navigates away.
-      if (result?.user) onAuthenticated();
+      if (result.user) onAuthenticated();
     } catch (err) {
       setError(mapFirebaseAuthError(err));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function submitPassword(event: FormEvent) {
+    event.preventDefault();
+    setBusy("password");
+    setError(null);
+    try {
+      if (mode === "register") {
+        await registerWithEmailPassword(email, password);
+      } else {
+        await signInWithEmailPassword(email, password);
+      }
+      setPassword("");
+      onAuthenticated();
+    } catch (err) {
+      setError(mapFirebaseAuthError(err));
+    } finally {
       setBusy(null);
     }
   }
@@ -30,7 +59,7 @@ export function AdminLogin({
         <img className="brand-logo" src="/campex-logo.png" alt="Campex logo" />
         <p className="eyebrow">Secure workspace</p>
         <h1>Sign in to Campex</h1>
-        <p className="hint">Continue with Google or Facebook to open the workspace.</p>
+        <p className="hint">Use Google, Facebook, or email and password via Firebase.</p>
 
         <div className="social-login-stack">
           <button
@@ -53,7 +82,49 @@ export function AdminLogin({
           </button>
         </div>
 
-        {error && <p className="global-error" role="alert">{error}</p>}
+        <div className="login-divider" role="separator"><span>or</span></div>
+
+        <form onSubmit={(event) => void submitPassword(event)}>
+          <label className="form-field">
+            <span>Email</span>
+            <input
+              type="email"
+              autoComplete="username"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              required
+            />
+          </label>
+          <label className="form-field">
+            <span>Password</span>
+            <input
+              type="password"
+              autoComplete={mode === "register" ? "new-password" : "current-password"}
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              minLength={6}
+              required
+            />
+          </label>
+          {error && <p className="global-error" role="alert">{error}</p>}
+          <button className="primary-button" type="submit" disabled={busy !== null}>
+            {busy === "password"
+              ? (mode === "register" ? "Creating account…" : "Signing in…")
+              : (mode === "register" ? "Create account" : "Sign in with email")}
+          </button>
+        </form>
+
+        <button
+          type="button"
+          className="text-button login-mode-switch"
+          disabled={busy !== null}
+          onClick={() => {
+            setMode((current) => current === "signin" ? "register" : "signin");
+            setError(null);
+          }}
+        >
+          {mode === "signin" ? "Need an account? Create one" : "Already have an account? Sign in"}
+        </button>
       </section>
     </main>
   );

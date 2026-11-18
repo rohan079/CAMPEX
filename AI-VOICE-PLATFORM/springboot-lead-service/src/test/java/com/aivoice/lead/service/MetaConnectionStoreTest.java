@@ -48,7 +48,9 @@ class MetaConnectionStoreTest {
         List<MetaGraphClient.AdAccount> adAccounts = List.of(
                 new MetaGraphClient.AdAccount("act_1", "Account", "1", 1, "INR"));
 
-        store.save(owner, profile, token, List.of("ads_read"), pages, adAccounts);
+        List<MetaGraphClient.InstagramAccount> instagramAccounts = List.of(
+                new MetaGraphClient.InstagramAccount("ig-1", "brand.ig", "Brand IG", "page-id"));
+        store.save(owner, profile, token, List.of("ads_read"), pages, adAccounts, instagramAccounts);
 
         var connectionCaptor = org.mockito.ArgumentCaptor.forClass(MetaConnection.class);
         org.mockito.Mockito.verify(connections).save(connectionCaptor.capture());
@@ -71,7 +73,9 @@ class MetaConnectionStoreTest {
         assertTrue(status.connected());
         assertEquals("Page", status.pages().get(0).name());
         assertEquals("1", status.adAccounts().get(0).accountId());
+        assertEquals("brand.ig", status.instagramAccounts().get(0).username());
         assertFalse(status.toString().contains(userToken));
         assertFalse(status.toString().contains(pageToken));
     }
 }
+

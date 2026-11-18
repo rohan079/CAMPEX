@@ -13,6 +13,11 @@ export default defineConfig(({ mode }) => {
       host: true,
       port: 5173,
       proxy: {
+        "/__/auth": {
+          target: "https://campex-f3ada.firebaseapp.com",
+          changeOrigin: true,
+          secure: true,
+        },
         "/api/auth": { target, changeOrigin: true, rewrite: stripApiPrefix },
         "/api/oauth": { target, changeOrigin: true, rewrite: stripApiPrefix },
         "/api/health": { target, changeOrigin: true, rewrite: stripApiPrefix },

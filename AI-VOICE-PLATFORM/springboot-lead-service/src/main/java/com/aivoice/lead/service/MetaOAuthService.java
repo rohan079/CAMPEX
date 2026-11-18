@@ -75,8 +75,16 @@ public class MetaOAuthService {
         if (profile.id().isBlank()) throw new MetaGraphClient.MetaGraphException(502, -1);
         List<MetaGraphClient.Page> pages = graph.pages(longLived.value());
         List<MetaGraphClient.AdAccount> adAccounts = graph.adAccounts(longLived.value());
+        List<MetaGraphClient.InstagramAccount> instagramAccounts = graph.instagramAccounts(longLived.value());
 
-        store.save(ownerEmail, profile, longLived, granted.stream().sorted().toList(), pages, adAccounts);
+        store.save(
+                ownerEmail,
+                profile,
+                longLived,
+                granted.stream().sorted().toList(),
+                pages,
+                adAccounts,
+                instagramAccounts);
     }
 
     public MetaConnectionStore.ConnectionStatus status(String ownerEmail) {

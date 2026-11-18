@@ -47,6 +47,9 @@ public class MetaGraphClient {
     public record AdAccount(String id, String name, String accountId, Integer status, String currency) {
     }
 
+    public record InstagramAccount(String id, String username, String name, String pageId) {
+    }
+
     public static class MetaGraphException extends RuntimeException {
         private final int httpStatus;
         private final int graphCode;
@@ -98,7 +101,7 @@ public class MetaGraphClient {
     }
 
     public List<Page> pages(String accessToken) {
-        return list("me/accounts", "id,name,category,access_token", accessToken).stream()
+        return list("me/accounts", "id,name,category,access_token,instagram_business_account{id,username,name}", accessToken).stream()
                 .map(node -> new Page(
                         node.path("id").asText(""),
                         node.path("name").asText("Facebook Page"),
@@ -106,6 +109,21 @@ public class MetaGraphClient {
                         node.path("access_token").asText(null)))
                 .filter(page -> !page.id().isBlank())
                 .toList();
+    }
+
+    /** Instagram professional accounts linked to the granted Facebook Pages. */
+    public List<InstagramAccount> instagramAccounts(String accessToken) {
+        List<InstagramAccount> accounts = new ArrayList<>();
+        for (JsonNode node : list("me/accounts", "id,instagram_business_account{id,username,name}", accessToken)) {
+            String pageId = node.path("id").asText("");
+            JsonNode ig = node.path("instagram_business_account");
+            String id = ig.path("id").asText("");
+            if (pageId.isBlank() || id.isBlank()) continue;
+            String username = ig.path("username").asText("");
+            String name = ig.path("name").asText(username.isBlank() ? "Instagram account" : username);
+            accounts.add(new InstagramAccount(id, username.isBlank() ? null : username, name, pageId));
+        }
+        return accounts;
     }
 
     public List<AdAccount> adAccounts(String accessToken) {

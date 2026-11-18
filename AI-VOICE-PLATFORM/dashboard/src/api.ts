@@ -76,6 +76,13 @@ export interface MetaAdAccount {
   currency?: string | null;
 }
 
+export interface MetaInstagramAccount {
+  id: string;
+  name: string;
+  username?: string | null;
+  page_id?: string | null;
+}
+
 export interface MetaConnectionStatus {
   connected: boolean;
   expired?: boolean;
@@ -84,6 +91,7 @@ export interface MetaConnectionStatus {
   token_expires_at?: string | null;
   pages: MetaPage[];
   ad_accounts: MetaAdAccount[];
+  instagram_accounts?: MetaInstagramAccount[];
 }
 
 export function getMetaConnection(): Promise<MetaConnectionStatus> {

@@ -22,7 +22,13 @@ class MetaOAuthServiceTest {
 
     private static final String OWNER = "operator@example.test";
     private static final List<String> SCOPES = List.of(
-            "ads_management", "ads_read", "business_management", "pages_show_list", "pages_read_engagement");
+            "ads_management",
+            "ads_read",
+            "business_management",
+            "pages_show_list",
+            "pages_read_engagement",
+            "instagram_basic",
+            "instagram_manage_insights");
 
     @Test
     void authorizationUrlUsesCurrentGraphVersionAndRequiredPermissions() {
@@ -53,6 +59,8 @@ class MetaOAuthServiceTest {
                 new MetaGraphClient.Page("page-1", "Campex Page", "Business", "page-token"));
         List<MetaGraphClient.AdAccount> accounts = List.of(
                 new MetaGraphClient.AdAccount("act_123", "Campex Ads", "123", 1, "INR"));
+        List<MetaGraphClient.InstagramAccount> instagramAccounts = List.of(
+                new MetaGraphClient.InstagramAccount("ig-1", "campex.ig", "Campex IG", "page-1"));
 
         when(graph.exchangeCode("code")).thenReturn(shortToken);
         when(graph.exchangeForLongLivedToken(shortToken.value())).thenReturn(longToken);
@@ -61,10 +69,18 @@ class MetaOAuthServiceTest {
         when(graph.profile(longToken.value())).thenReturn(profile);
         when(graph.pages(longToken.value())).thenReturn(pages);
         when(graph.adAccounts(longToken.value())).thenReturn(accounts);
+        when(graph.instagramAccounts(longToken.value())).thenReturn(instagramAccounts);
 
         new MetaOAuthService(properties, graph, store).complete(OWNER, "code");
 
-        verify(store).save(OWNER, profile, longToken, SCOPES.stream().sorted().toList(), pages, accounts);
+        verify(store).save(
+                OWNER,
+                profile,
+                longToken,
+                SCOPES.stream().sorted().toList(),
+                pages,
+                accounts,
+                instagramAccounts);
     }
 
     @Test
@@ -77,8 +93,14 @@ class MetaOAuthServiceTest {
 
         MetaOAuthService service = new MetaOAuthService(properties(), graph, store);
         assertThrows(MetaOAuthService.MissingPermissionsException.class, () -> service.complete(OWNER, "code"));
-        verify(store, never()).save(eq(OWNER), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
-                anyList(), anyList(), anyList());
+        verify(store, never()).save(
+                eq(OWNER),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(),
+                anyList(),
+                anyList(),
+                anyList(),
+                anyList());
     }
 
     @Test
