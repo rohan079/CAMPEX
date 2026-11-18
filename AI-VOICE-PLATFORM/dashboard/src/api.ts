@@ -34,10 +34,27 @@ async function authHeaders(init?: RequestInit): Promise<Headers> {
   await auth.authStateReady();
   const user = auth.currentUser;
   if (!user) {
-    throw new ApiError("Firebase authentication required", 401);
+    throw new ApiError("Sign in required", 401);
   }
   headers.set("Authorization", `Bearer ${await user.getIdToken()}`);
   return headers;
+}
+
+function publicErrorMessage(status: number, raw?: string): string {
+  if (status === 401) return "Sign in required";
+  if (status === 403) return "You don't have access to this action";
+  if (status === 404) return "The requested item was not found";
+  if (status === 429) return "Too many requests. Try again shortly.";
+  if (status >= 500) return "Something went wrong. Try again in a moment.";
+  const candidate = raw?.trim();
+  if (
+    candidate
+    && candidate.length < 160
+    && !/exception|stack|trace|sql|token|secret|api[_ ]?key|oauth|firebase|jwks|bearer|traceback|\/Users\/|java\.|org\.|at \w+\./i.test(candidate)
+  ) {
+    return candidate;
+  }
+  return "Request could not be completed. Try again.";
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -46,18 +63,18 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   try {
     response = await fetch(path, { ...init, headers, credentials: "same-origin" });
   } catch {
-    throw new Error("Cannot reach the CAMPEX API. Check the dashboard deployment and backend status, then refresh.");
+    throw new Error("Cannot reach Campex right now. Refresh and try again.");
   }
   if (!response.ok) {
-    let message = response.statusText;
+    let raw: string | undefined;
     try {
       const body = JSON.parse(await response.text()) as { detail?: unknown; message?: unknown };
-      if (typeof body.detail === "string") message = body.detail;
-      else if (typeof body.message === "string") message = body.message;
+      if (typeof body.detail === "string") raw = body.detail;
+      else if (typeof body.message === "string") raw = body.message;
     } catch {
-      message = response.statusText;
+      // ignore parse errors
     }
-    throw new ApiError(message || `Request failed (${response.status})`, response.status);
+    throw new ApiError(publicErrorMessage(response.status, raw), response.status);
   }
   if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;

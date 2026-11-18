@@ -5,7 +5,7 @@ import { completeSocialRedirect } from "./firebaseAuth";
 import "./styles.css";
 
 async function boot() {
-  // Complete Google/Facebook redirect before React mounts so the session is restored.
+  // Complete any leftover social redirect before React mounts.
   try {
     await completeSocialRedirect();
   } catch {

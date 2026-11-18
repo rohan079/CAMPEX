@@ -280,10 +280,9 @@ export function CampaignStudio({
         content: [headline.trim(), body.trim()].filter(Boolean).join("\n\n") || "No draft copy supplied.",
         ad_account_id: selectedAdAccountId || undefined,
       });
-      const toolNote = result.tools_used?.length ? `\n\nMeta data tools used: ${result.tools_used.join(", ")}.` : "";
       setMessages((current) => [...current, {
         role: "assistant",
-        content: `${result.reply}${toolNote}`,
+        content: result.reply,
         suggestedCopy: result.suggested_copy ?? undefined,
       }]);
     } catch (err) {
@@ -339,7 +338,7 @@ export function CampaignStudio({
       return;
     }
     const confirmed = window.confirm(
-      `Create a PAUSED Meta campaign in the selected ad account? This creates Meta campaign objects but does not start delivery. Review the result in Ads Manager before activating.`,
+      `Create a paused campaign in the selected ad account? Ads will not start delivering until you review and activate them in Ads Manager.`,
     );
     if (!confirmed) return;
     setPublishBusy(true);
@@ -361,10 +360,8 @@ export function CampaignStudio({
       setAdsManagerUrl(result.ads_manager_url);
       setNotice(
         result.warning
-          ? `Created paused campaign ${result.campaign_id} and ad set ${result.ad_set_id}. ${result.warning}`
-          : result.ad_id
-            ? `Created paused Meta campaign ${result.campaign_id} with ad ${result.ad_id}. Review and activate it in Ads Manager.`
-            : `Created paused campaign ${result.campaign_id} and ad set ${result.ad_set_id}. Review it in Ads Manager before activating.`,
+          ? `Campaign created as paused. ${result.warning}`
+          : "Campaign created as paused. Review and activate it in Ads Manager when ready.",
       );
     } catch (err) {
       setError(err instanceof ApiError || err instanceof Error ? err.message : "Could not publish to Meta");
@@ -474,7 +471,7 @@ export function CampaignStudio({
                 </label>
               </div>
             </div>
-            <p className="targeting-note">Audience targeting is sent to Meta when you publish. Campaigns are created as PAUSED so you can review them in Ads Manager first.</p>
+            <p className="targeting-note">Audience targeting is applied when you publish. New campaigns stay paused until you activate them in Ads Manager.</p>
             {metaReady && (
               <div className="form-two-col targeting-grid" style={{ marginTop: 12 }}>
                 <label className="form-field">
@@ -605,10 +602,10 @@ export function CampaignStudio({
                 {" "}
                 {unsupportedSelected
                   ? "Deselect Google Ads or WhatsApp Business messaging to enable Publish (Meta channels only)."
-                  : "Creation requires confirmation. Campaign and ad set are created PAUSED; review them in Ads Manager before activating."}
+                  : "Confirm to create a paused campaign you can review in Ads Manager before activating."}
               </p>
             ) : (
-              <p><strong>Meta Business is not connected.</strong> Connect an ad account under Channels before publishing.</p>
+              <p><strong>Meta Business is not connected.</strong> Connect an ad account under Channels before you publish.</p>
             )}
             <button type="button" className="text-button" onClick={onOpenChannels}>View channel setup</button>
           </div>
@@ -619,7 +616,7 @@ export function CampaignStudio({
             <div className="assistant-head">
               <span className="assistant-spark">✦</span>
               <div><p className="step-label">AI CAMPAIGN ASSISTANT</p><h3>Copy and performance</h3></div>
-              <span className="ai-mode">Server-side</span>
+              <span className="ai-mode">Secure</span>
             </div>
             <p className="assistant-intro">Improve copy or ask about connected Meta performance. Meta insights are read-only here; campaign changes require a separate confirmation.</p>
             <div className="assistant-messages" aria-live="polite">
@@ -641,7 +638,7 @@ export function CampaignStudio({
                 <button type="submit" className="send-button" disabled={aiBusy || !prompt.trim() || platforms.length === 0} aria-label="Send prompt">↑</button>
               </div>
             </form>
-            <p className="ai-privacy">Meta metrics and campaign copy are sent to the configured AI provider for answers; access tokens stay server-side. Use only verified property facts.</p>
+            <p className="ai-privacy">Use only verified property facts. Review every suggestion before publishing.</p>
           </section>
 
           <section className="surface-card drafts-card">

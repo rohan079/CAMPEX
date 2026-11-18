@@ -21,7 +21,7 @@ const DAYS_KEY = "campaign-workspace.days";
 const PAGE_META: Record<View, { title: string; eyebrow: string; description: string }> = {
   campaigns: { title: "Campaign studio", eyebrow: "Create and distribute", description: "Plan one creative for every channel." },
   performance: { title: "Performance", eyebrow: "Measure what matters", description: "Reach, lead quality and outcomes." },
-  "meta-ads": { title: "Meta Ads", eyebrow: "Live Meta MCP", description: "Accounts, campaigns, ads, and insights from Meta Business tools." },
+  "meta-ads": { title: "Meta Ads", eyebrow: "Advertising", description: "Accounts, campaigns, ads, and performance from your Meta Business connection." },
   "lead-review": { title: "Lead review", eyebrow: "Keep the pipeline clean", description: "Accept qualified leads or reject them from future follow-up." },
   channels: { title: "Channels", eyebrow: "Workspace setup", description: "Manage platform publishing connections." },
   clients: { title: "Clients", eyebrow: "Workspace setup", description: "Manage the businesses in this workspace." },
@@ -68,7 +68,7 @@ export function App() {
         })
         .catch((err) => {
           if (!active) return;
-          setAuthError(err instanceof Error ? err.message : "Could not establish Firebase session");
+          setAuthError(err instanceof Error ? err.message : "Could not complete sign-in");
           setAuthState("anonymous");
         });
     });
@@ -203,7 +203,7 @@ export function App() {
         </nav>
         <div className="sidebar-bottom">
           <div className={`connection-status${health ? " online" : ""}`}><span className="status-orb" />
-            <span><strong>{health ? "Lead service connected" : "Checking connection"}</strong><small>{health?.environment ?? "API status"}</small></span>
+            <span><strong>{health ? "Workspace online" : "Checking connection"}</strong><small>Campex services</small></span>
           </div>
           <p className="sidebar-footer">Campaigns · reach · lead quality</p>
         </div>

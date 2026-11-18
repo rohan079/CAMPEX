@@ -4,8 +4,7 @@ import {
   mapFirebaseAuthError,
   registerWithEmailPassword,
   signInWithEmailPassword,
-  signInWithSocial,
-  type SocialProvider,
+  signInWithGoogle,
 } from "./firebaseAuth";
 
 export function AdminLogin({
@@ -18,14 +17,14 @@ export function AdminLogin({
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [mode, setMode] = useState<"signin" | "register">("signin");
-  const [busy, setBusy] = useState<"password" | SocialProvider | null>(null);
+  const [busy, setBusy] = useState<"password" | "google" | null>(null);
   const [error, setError] = useState<string | null>(initialError ?? null);
 
-  async function socialSignIn(provider: SocialProvider) {
-    setBusy(provider);
+  async function googleSignIn() {
+    setBusy("google");
     setError(null);
     try {
-      const result = await signInWithSocial(provider);
+      const result = await signInWithGoogle();
       if (result.user) onAuthenticated();
     } catch (err) {
       setError(mapFirebaseAuthError(err));
@@ -57,28 +56,19 @@ export function AdminLogin({
     <main className="admin-login-shell">
       <section className="admin-login-card">
         <img className="brand-logo" src="/campex-logo.png" alt="Campex logo" />
-        <p className="eyebrow">Campex authentication</p>
+        <p className="eyebrow">Secure workspace</p>
         <h1>Sign in to Campex</h1>
-        <p className="hint">Firebase user login: Google, Facebook, or email and password. Meta Ads accounts are connected later under Channels.</p>
+        <p className="hint">Use Google or your email and password to continue.</p>
 
         <div className="social-login-stack">
           <button
             type="button"
             className="social-button google"
             disabled={busy !== null}
-            onClick={() => void socialSignIn("google")}
+            onClick={() => void googleSignIn()}
           >
             <span className="social-mark" aria-hidden="true">G</span>
-            {busy === "google" ? "Connecting Google…" : "Continue with Google"}
-          </button>
-          <button
-            type="button"
-            className="social-button facebook"
-            disabled={busy !== null}
-            onClick={() => void socialSignIn("facebook")}
-          >
-            <span className="social-mark" aria-hidden="true">f</span>
-            {busy === "facebook" ? "Connecting Facebook…" : "Continue with Facebook"}
+            {busy === "google" ? "Connecting…" : "Continue with Google"}
           </button>
         </div>
 
