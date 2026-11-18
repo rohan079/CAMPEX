@@ -51,8 +51,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   if (!response.ok) {
     let message = response.statusText;
     try {
-      const body = JSON.parse(await response.text()) as { detail?: unknown };
+      const body = JSON.parse(await response.text()) as { detail?: unknown; message?: unknown };
       if (typeof body.detail === "string") message = body.detail;
+      else if (typeof body.message === "string") message = body.message;
     } catch {
       message = response.statusText;
     }

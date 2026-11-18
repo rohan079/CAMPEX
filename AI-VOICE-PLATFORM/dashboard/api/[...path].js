@@ -41,6 +41,11 @@ function headerValue(req, name) {
   return undefined;
 }
 
+// Campaign AI / Meta publish can wait on upstream model calls.
+export const config = {
+  maxDuration: 60,
+};
+
 export default async function handler(req, res) {
   let backend;
   try {

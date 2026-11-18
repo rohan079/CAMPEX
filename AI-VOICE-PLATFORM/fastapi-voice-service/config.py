@@ -111,11 +111,16 @@ class Settings(BaseSettings):
         return urlsplit(self.hf_speech_ws_url).scheme in {"ws", "wss"} and bool(urlsplit(self.hf_speech_ws_url).netloc)
 
     @property
+    def campaign_ai_api_key(self) -> str:
+        """Prefer AI_API_KEY; fall back to OPENAI_API_KEY so one secret covers both speech and copy assist."""
+        return self.ai_api_key or self.openai_api_key
+
+    @property
     def ai_configured(self) -> bool:
         base = urlsplit(self.ai_base_url)
         endpoint_valid = base.scheme in {"http", "https"} and bool(base.netloc)
         if self.ai_provider == "openai":
-            return endpoint_valid and bool(self.ai_api_key)
+            return endpoint_valid and bool(self.campaign_ai_api_key)
         return endpoint_valid and bool(self.ai_model)
 
     @property

@@ -1,5 +1,6 @@
 package com.aivoice.lead.config;
 
+import com.aivoice.lead.service.Exceptions.CampaignAssistException;
 import com.aivoice.lead.service.Exceptions.InvalidPhoneException;
 import com.aivoice.lead.service.Exceptions.MessageDeliveryException;
 import com.aivoice.lead.service.Exceptions.NotFoundException;
@@ -43,6 +44,12 @@ public class ApiExceptionHandler {
                 ? e.providerMessage()
                 : "Meta could not complete the requested account operation";
         return body(HttpStatus.BAD_GATEWAY, detail);
+    }
+
+    @ExceptionHandler(CampaignAssistException.class)
+    public ResponseEntity<Map<String, String>> campaignAssist(CampaignAssistException e) {
+        HttpStatus status = e.status() == 503 ? HttpStatus.SERVICE_UNAVAILABLE : HttpStatus.BAD_GATEWAY;
+        return body(status, e.getMessage());
     }
 
     @ExceptionHandler(MessageDeliveryException.class)

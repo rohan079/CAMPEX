@@ -39,7 +39,7 @@ public class CampaignAssistController {
             return voice.campaignAssist(request, accessToken);
         } catch (CampaignAssistException exception) {
             HttpStatus status = exception.status() == 503 ? HttpStatus.SERVICE_UNAVAILABLE : HttpStatus.BAD_GATEWAY;
-            throw new ResponseStatusException(status, "Campaign AI is unavailable", exception);
+            throw new ResponseStatusException(status, exception.getMessage(), exception);
         }
     }
 }

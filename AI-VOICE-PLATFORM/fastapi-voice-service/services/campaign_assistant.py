@@ -151,13 +151,23 @@ class CampaignAssistantService:
             f"User request: {request.prompt}\n\nCurrent ad content:\n{request.content}"
         )
         headers = {"Content-Type": "application/json"}
-        if settings.ai_api_key:
-            headers["Authorization"] = f"Bearer {settings.ai_api_key}"
+        api_key = settings.campaign_ai_api_key
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
 
         try:
             async with httpx.AsyncClient(timeout=settings.ai_timeout_seconds, transport=self._transport) as client:
                 if meta_access_token and self._meta_mcp is not None:
-                    return await self._assist_with_meta_tools(client, headers, system, user, meta_access_token)
+                    try:
+                        return await self._assist_with_meta_tools(client, headers, system, user, meta_access_token)
+                    except CampaignAssistantUnavailable as exc:
+                        # Copy assist should still work when Meta tools are unhealthy.
+                        logger.warning("Meta tool assist failed (%s); falling back to copy-only", exc)
+                        system += (
+                            "\nMeta Ads tools failed for this request. Answer from the supplied draft only "
+                            "and say live Meta metrics were unavailable."
+                        )
+                        return await self._complete_without_tools(client, headers, system, user)
                 return await self._complete_without_tools(client, headers, system, user)
         except httpx.HTTPError as exc:
             logger.warning("Campaign AI request failed (%s)", exc.__class__.__name__)

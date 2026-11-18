@@ -100,10 +100,32 @@ public class VoiceServiceClient {
             return response;
         } catch (HttpStatusCodeException e) {
             int status = e.getStatusCode().value() == 503 ? 503 : 502;
-            throw new CampaignAssistException("Campaign AI is unavailable", status, e);
+            throw new CampaignAssistException(extractUpstreamDetail(e, "Campaign AI is unavailable"), status, e);
         } catch (ResourceAccessException e) {
-            throw new CampaignAssistException("Campaign AI service did not respond", 502, e);
+            throw new CampaignAssistException(
+                    "Campaign AI service did not respond. Check VOICE_SERVICE_URL and that the voice service is running.",
+                    502,
+                    e);
         }
+    }
+
+    private static String extractUpstreamDetail(HttpStatusCodeException error, String fallback) {
+        try {
+            String body = error.getResponseBodyAsString();
+            if (body != null && body.contains("\"detail\"")) {
+                int start = body.indexOf("\"detail\"");
+                int colon = body.indexOf(':', start);
+                int firstQuote = body.indexOf('"', colon + 1);
+                int secondQuote = body.indexOf('"', firstQuote + 1);
+                if (firstQuote >= 0 && secondQuote > firstQuote) {
+                    String detail = body.substring(firstQuote + 1, secondQuote).trim();
+                    if (!detail.isBlank()) return detail;
+                }
+            }
+        } catch (RuntimeException ignored) {
+            // keep fallback
+        }
+        return fallback;
     }
 
     /** Calls the private FastMCP publishing tool; the user's Meta token never enters the browser or logs. */
