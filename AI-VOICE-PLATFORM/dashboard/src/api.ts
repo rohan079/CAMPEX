@@ -102,6 +102,39 @@ export function disconnectMeta(): Promise<void> {
   return request<void>("/api/oauth/meta/connection", { method: "DELETE" });
 }
 
+export interface MetaCampaignPublishRequest {
+  campaign_name: string;
+  objective: "leads" | "traffic" | "sales" | "awareness";
+  platforms: Array<"facebook" | "instagram" | "whatsapp_ads">;
+  location: string;
+  age_min: number;
+  age_max: number;
+  headline: string;
+  body: string;
+  cta: string;
+  ad_account_id?: string;
+  page_id?: string;
+  daily_budget_minor?: number;
+  confirmed: boolean;
+}
+
+export interface MetaCampaignPublishResponse {
+  campaign_id: string;
+  ad_set_id: string;
+  ad_id?: string | null;
+  ad_account_id: string;
+  status: string;
+  ads_manager_url: string;
+  warning?: string | null;
+}
+
+export function publishMetaCampaign(body: MetaCampaignPublishRequest): Promise<MetaCampaignPublishResponse> {
+  return request<MetaCampaignPublishResponse>("/api/meta/campaigns/publish", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
 export function getHealth(): Promise<Health> {
   return request<Health>("/api/health");
 }

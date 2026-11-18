@@ -90,12 +90,15 @@ export interface CampaignAssistRequest {
   language: LanguageCode;
   prompt: string;
   content: string;
+  ad_account_id?: string;
 }
 
 export interface CampaignAssistResponse {
   reply: string;
   provider: string;
   model: string;
+  suggested_copy?: string | null;
+  tools_used?: string[];
 }
 
 export interface CallPage {

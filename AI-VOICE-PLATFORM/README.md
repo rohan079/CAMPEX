@@ -312,9 +312,10 @@ META_APP_SECRET=your-meta-app-secret
 WHATSAPP_ACCESS_TOKEN=your-meta-system-user-token
 WHATSAPP_PHONE_NUMBER_ID=your-meta-phone-number-id
 WHATSAPP_GRAPH_API_VERSION=your-supported-graph-api-version
-META_APP_ID=your-meta-app-id
+META_APP_ID=your-meta-business-app-id
 META_OAUTH_REDIRECT_URI=https://campex-production.up.railway.app/oauth/meta/callback
 META_GRAPH_API_VERSION=v27.0
+META_LOGIN_CONFIG_ID=your-facebook-login-for-business-config-id
 META_OAUTH_SCOPES=ads_management,ads_read,business_management,pages_show_list,pages_read_engagement,instagram_basic,instagram_manage_insights
 META_TOKEN_ENCRYPTION_KEY=<base64-encoded-32-byte-key>
 CAMPEX_FRONTEND_URL=https://campexdashboard.vercel.app
@@ -343,24 +344,71 @@ FastAPI has its own `LEAD_SERVICE_URL`, which should point privately to Spring, 
 calls; the Vercel proxy keeps dashboard API calls same-origin. See the [dashboard env template](./dashboard/.env.example)
 and [voice-service env template](./infrastructure/voice-service.env.example) for their remaining settings.
 
-### Meta OAuth setup
+### Auth architecture (two separate Meta products)
 
-The backend requests `ads_management`, `ads_read`, `business_management`, `pages_show_list`, and
-`pages_read_engagement`, `instagram_basic`, and `instagram_manage_insights`. The configured Graph API version is **v27.0**, the latest version listed in [Meta's Graph API
-changelog](https://developers.facebook.com/documentation/development/graph-api/changelog/) on 2026-11-16. In Meta's App Dashboard:
+Campex uses **two different identity flows**. Do not put Facebook Login for Business credentials into Firebase.
 
-1. Add the Facebook Login product and configure web OAuth login.
-2. Set **Valid OAuth Redirect URIs** to exactly `https://campex-production.up.railway.app/oauth/meta/callback`.
-3. Add `campex-production.up.railway.app` and `campexdashboard.vercel.app` as app domains, and use the Vercel URL as the website URL.
-4. Add the requested permissions to the app and request any required advanced access/app review before production use. Add a test admin account while the app is in Development mode.
-5. Set `META_APP_ID`, `META_APP_SECRET`, `META_OAUTH_REDIRECT_URI`, `META_GRAPH_API_VERSION=v27.0`,
-   `META_TOKEN_ENCRYPTION_KEY`, and `CAMPEX_FRONTEND_URL` in Railway. `META_APP_SECRET` is server-only and is also used by the existing WhatsApp webhook verification.
+| Layer | Purpose | Product | Where |
+| --- | --- | --- | --- |
+| **1. Campex user authentication** | Sign into the dashboard | **Firebase** (Google, consumer Facebook Login, email/password) | Login screen |
+| **2. Connect Meta Ads account** | Grant Business assets | **Meta Business Login** | Channels → Connect Meta Business |
 
-The callback exchanges the code server-to-server, validates the one-time OAuth `state`, checks the granted permissions,
-loads the profile, Pages, and ad accounts, and stores user/Page tokens encrypted with AES-256-GCM. Status responses
-contain only account metadata and token expiry—never access tokens or the app secret. Expired connections are marked
-and require reconnecting. Disconnect revokes the Meta login grant and removes encrypted tokens locally. The current
-connector reads account metadata; campaign publishing remains disabled until its separate publishing workflow is implemented and reviewed.
+#### 1) Firebase — Campex user authentication
+
+Enable in Firebase Console → Authentication → Sign-in method: **Google**, **Facebook**, **Email/Password**.
+
+For Firebase **Facebook Login**, use a **consumer** Meta app (use case *Authenticate and request data from users with Facebook Login*):
+
+1. Use cases → Edit → **Add** `email` (keep `public_profile`).
+2. Facebook Login → Settings: enable Client/Web OAuth Login.
+3. Valid OAuth Redirect URI: `https://campex-f3ada.firebaseapp.com/__/auth/handler`
+4. App Domains: `campex-f3ada.firebaseapp.com`, `campexdashboard.vercel.app`
+5. Paste that app’s App ID + App Secret into Firebase → Facebook provider.
+6. Firebase Authorized domains: include `campexdashboard.vercel.app` and `localhost`.
+
+Do **not** use Facebook Login for Business for this layer — that causes “needs at least one supported permission” when only `email` is requested.
+
+#### 2) Meta Business Login — Connect Meta Ads account
+
+Used only by **Channels** to load Facebook Business assets: ad accounts, Pages, Instagram professional accounts, and campaign permissions (`ads_management`, `ads_read`, `business_management`, `pages_*`, `instagram_*`). Graph API version **v27.0**.
+
+1. Meta App Dashboard → add **Facebook Login for Business**.
+2. **Configurations** → create a config with at least:
+   - `ads_management`, `ads_read`
+   - `business_management`
+   - `pages_show_list`, `pages_read_engagement`
+   - `instagram_basic`, `instagram_manage_insights`
+3. Valid OAuth Redirect URI: `https://campex-production.up.railway.app/oauth/meta/callback`
+4. App Domains: `campex-production.up.railway.app`, `campexdashboard.vercel.app`
+5. Railway variables:
+   - `META_APP_ID` / `META_APP_SECRET` (Business app)
+   - `META_OAUTH_REDIRECT_URI=https://campex-production.up.railway.app/oauth/meta/callback`
+   - `META_LOGIN_CONFIG_ID=<configuration id from step 2>`
+   - `META_GRAPH_API_VERSION=v27.0`
+   - `META_TOKEN_ENCRYPTION_KEY` (`openssl rand -base64 32`)
+   - `CAMPEX_FRONTEND_URL=https://campexdashboard.vercel.app`
+
+The callback exchanges the code server-to-server, validates OAuth `state`, loads profile / Pages / Instagram / ad accounts, and stores tokens encrypted with AES-256-GCM. Status responses never include access tokens.
+
+Campaign Studio **Publish** calls `POST /api/meta/campaigns/publish` and creates a **PAUSED** Meta campaign and ad set using the connected Business token. The current dashboard does not upload its selected image as a Meta creative; finish the ad in Ads Manager before activating.
+
+### CAMPEX Meta Ads MCP
+
+CAMPEX hosts a private FastMCP server inside `fastapi-voice-service` at `/mcp/meta-ads`. The Campaign AI uses FastMCP's in-process client to discover and call read-only account, campaign, ad-set, ad, and Insights tools. The existing Spring backend authenticates the Firebase user and supplies that user's encrypted Meta token to FastAPI over the internal service connection; the token is not included in the OpenAI prompt, model-visible tool schema, browser response, or logs. The AI receives only the requested Meta result data for its response.
+
+```mermaid
+flowchart LR
+  UI[React dashboard] -->|Firebase ID token| Spring[Spring Boot auth and account boundary]
+  Spring -->|private service key + user Meta token| AI[FastAPI campaign assistant]
+  AI -->|MCP Client| MCP[FastMCP tools]
+  MCP -->|Meta token in Authorization header| Graph[Meta Marketing API]
+```
+
+The HTTP MCP endpoint also requires the internal `X-Service-Key`; do not publish that key in a browser or MCP client config. The cloned `google-ads-meta-ads-mcp` directory contains a Ryze hosted-connector configuration, not a self-hosted server implementation. CAMPEX does not call that third-party endpoint or send account credentials to it. The local audit prompt is `fastapi-voice-service/prompts/meta_ads_audit.txt`, adapted from the supplied Meta Ads audit skill without its Ryze connection instructions.
+
+The AI assistant exposes read-only tools for account/page/Instagram discovery, campaigns, ad sets, ads, and account/campaign/ad-set/ad insights. It does not invoke write tools from natural-language chat. Campaign Studio creation requires an explicit browser confirmation and creates objects as **PAUSED**; status-change and delete tools also require an explicit confirmation argument. Image upload, lead-form retrieval, Ad Library search, audience-overlap measurement, and budget/creative editing are not implemented in this integration. Live Meta API behavior still needs verification with an approved test account; no live campaign was created during development.
+
+Set `META_GRAPH_API_VERSION=v27.0` in the voice-service environment. The MCP HTTP endpoint uses the existing `INTERNAL_SERVICE_KEY`; keep the same key configured on the Spring and FastAPI services.
 
 Voice service (`fastapi-voice-service/.env.example`): `CALL_PROVIDER=edesy` (legacy `openai_sip` remains available),
 `SPEECH_ENGINE=hf|openai_realtime`, Edesy settings, and `MAX_CONCURRENT_CALLS`. HF mode uses `HF_SPEECH_WS_URL`;

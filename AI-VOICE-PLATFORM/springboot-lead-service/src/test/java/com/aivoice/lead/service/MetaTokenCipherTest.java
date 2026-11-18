@@ -16,7 +16,7 @@ class MetaTokenCipherTest {
         String key = Base64.getEncoder().encodeToString(new byte[32]);
         MetaOAuthProperties properties = new MetaOAuthProperties(
                 "app-id", "app-secret", "https://campex.example/oauth/meta/callback", "v27.0", key,
-                "https://campex.example", List.of("pages_show_list"));
+                "https://campex.example", "", List.of("pages_show_list"));
         MetaTokenCipher cipher = new MetaTokenCipher(properties);
 
         MetaTokenCipher.EncryptedValue encrypted = cipher.encrypt("opaque-meta-token", "user:operator@example.test");

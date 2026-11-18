@@ -44,15 +44,20 @@ public class MetaOAuthService {
 
     public URI authorizationUri(String state) {
         requireConfigured();
-        return UriComponentsBuilder.fromUriString("https://www.facebook.com/" + properties.graphApiVersion() + "/dialog/oauth")
+        // Channels connector uses Meta Business Login. When META_LOGIN_CONFIG_ID is set,
+        // permissions come from that configuration (required for Login for Business).
+        UriComponentsBuilder builder = UriComponentsBuilder
+                .fromUriString("https://www.facebook.com/" + properties.graphApiVersion() + "/dialog/oauth")
                 .queryParam("client_id", properties.appId())
                 .queryParam("redirect_uri", properties.oauthRedirectUri())
                 .queryParam("response_type", "code")
-                .queryParam("state", state)
-                .queryParam("scope", String.join(",", properties.oauthScopes()))
-                .build()
-                .encode()
-                .toUri();
+                .queryParam("state", state);
+        if (properties.hasLoginConfigId()) {
+            builder.queryParam("config_id", properties.loginConfigId());
+        } else {
+            builder.queryParam("scope", String.join(",", properties.oauthScopes()));
+        }
+        return builder.build().encode().toUri();
     }
 
     public void complete(String ownerEmail, String code) {
@@ -66,10 +71,22 @@ public class MetaOAuthService {
                 .filter(permission -> "granted".equalsIgnoreCase(permission.status()))
                 .map(permission -> permission.name().toLowerCase(Locale.ROOT))
                 .collect(Collectors.toSet());
-        List<String> missing = properties.oauthScopes().stream()
-                .filter(scope -> !granted.contains(scope.toLowerCase(Locale.ROOT)))
-                .toList();
-        if (!missing.isEmpty()) throw new MissingPermissionsException(missing);
+        if (properties.hasLoginConfigId()) {
+            // Business Login configs define permissions; require at least one ads/pages scope.
+            boolean hasBusinessAccess = granted.stream().anyMatch(scope ->
+                    scope.startsWith("ads_")
+                            || scope.startsWith("pages_")
+                            || scope.equals("business_management")
+                            || scope.startsWith("instagram_"));
+            if (!hasBusinessAccess) {
+                throw new MissingPermissionsException(List.of("ads_management|pages_show_list|business_management"));
+            }
+        } else {
+            List<String> missing = properties.oauthScopes().stream()
+                    .filter(scope -> !granted.contains(scope.toLowerCase(Locale.ROOT)))
+                    .toList();
+            if (!missing.isEmpty()) throw new MissingPermissionsException(missing);
+        }
 
         MetaGraphClient.Profile profile = graph.profile(longLived.value());
         if (profile.id().isBlank()) throw new MetaGraphClient.MetaGraphException(502, -1);

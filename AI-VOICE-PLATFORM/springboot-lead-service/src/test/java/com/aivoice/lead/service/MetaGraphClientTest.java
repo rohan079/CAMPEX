@@ -131,6 +131,6 @@ class MetaGraphClientTest {
     private static MetaOAuthProperties properties() {
         return new MetaOAuthProperties("test-app-id", "test-app-secret",
                 "https://campex.example/oauth/meta/callback", "v27.0",
-                Base64.getEncoder().encodeToString(new byte[32]), "https://campex.example", List.of("ads_read"));
+                Base64.getEncoder().encodeToString(new byte[32]), "https://campex.example", "", List.of("ads_read"));
     }
 }

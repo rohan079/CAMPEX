@@ -59,6 +59,9 @@ class Settings(BaseSettings):
     ai_model: str = "gpt-4o-mini"
     ai_timeout_seconds: float = 45
 
+    # Meta Marketing API version used by the private Meta Ads MCP server.
+    meta_graph_api_version: str = Field(default="v27.0", pattern=r"^v\d+\.\d+$")
+
     # ElevenLabs (optional, used for cloned voice)
     elevenlabs_api_key: str = ""
     elevenlabs_voice_id: str = ""

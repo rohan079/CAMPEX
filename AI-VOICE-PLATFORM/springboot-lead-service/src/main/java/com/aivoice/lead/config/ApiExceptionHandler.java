@@ -39,7 +39,10 @@ public class ApiExceptionHandler {
     @ExceptionHandler(MetaGraphException.class)
     public ResponseEntity<Map<String, String>> metaGraph(MetaGraphException e) {
         log.warn("Meta Graph request failed during a user action (HTTP {}, code {})", e.httpStatus(), e.graphCode());
-        return body(HttpStatus.BAD_GATEWAY, "Meta could not complete the requested account operation");
+        String detail = e.providerMessage() != null && !e.providerMessage().isBlank()
+                ? e.providerMessage()
+                : "Meta could not complete the requested account operation";
+        return body(HttpStatus.BAD_GATEWAY, detail);
     }
 
     @ExceptionHandler(MessageDeliveryException.class)

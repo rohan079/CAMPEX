@@ -1,7 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ChangeEvent, FormEvent } from "react";
-import { assistCampaign } from "./api";
+import { ApiError, assistCampaign, getMetaConnection, publishMetaCampaign } from "./api";
+import type { MetaConnectionStatus } from "./api";
 import type { CampaignPlatform, Client, LanguageCode } from "./types";
+
+const META_PUBLISH_PLATFORMS = new Set<CampaignPlatform>(["facebook", "instagram", "whatsapp_ads"]);
 
 type Objective = "leads" | "traffic" | "sales" | "awareness";
 type Draft = {
@@ -20,7 +23,7 @@ type Draft = {
   imageName: string;
   savedAt: string;
 };
-type AssistantMessage = { role: "assistant" | "user"; content: string };
+type AssistantMessage = { role: "assistant" | "user"; content: string; suggestedCopy?: string };
 
 const STORAGE_KEY = "campaign-studio.drafts.v2";
 const AGE_MIN_FLOOR = 18;
@@ -83,11 +86,6 @@ function readDrafts(): Draft[] {
   }
 }
 
-function suggestedCopy(reply: string): string {
-  const match = /suggested copy:\s*([\s\S]*)/i.exec(reply);
-  return (match?.[1] ?? reply).trim();
-}
-
 export function CampaignStudio({
   client,
   onOpenChannels,
@@ -113,14 +111,39 @@ export function CampaignStudio({
   const [previewPlatform, setPreviewPlatform] = useState<CampaignPlatform>("facebook");
   const [prompt, setPrompt] = useState("");
   const [messages, setMessages] = useState<AssistantMessage[]>(INITIAL_MESSAGES);
-  const [suggestion, setSuggestion] = useState<string | null>(null);
   const [aiBusy, setAiBusy] = useState(false);
+  const [publishBusy, setPublishBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [metaConnection, setMetaConnection] = useState<MetaConnectionStatus | null>(null);
+  const [metaLoading, setMetaLoading] = useState(true);
+  const [selectedAdAccountId, setSelectedAdAccountId] = useState("");
+  const [selectedPageId, setSelectedPageId] = useState("");
+  const [adsManagerUrl, setAdsManagerUrl] = useState<string | null>(null);
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(drafts));
   }, [drafts]);
+
+  useEffect(() => {
+    let active = true;
+    setMetaLoading(true);
+    void getMetaConnection()
+      .then((status) => {
+        if (!active) return;
+        setMetaConnection(status);
+        setSelectedAdAccountId((current) => current || status.ad_accounts[0]?.id || "");
+        setSelectedPageId((current) => current || status.pages[0]?.id || "");
+      })
+      .catch(() => {
+        if (!active) return;
+        setMetaConnection(null);
+      })
+      .finally(() => {
+        if (active) setMetaLoading(false);
+      });
+    return () => { active = false; };
+  }, []);
 
   useEffect(() => {
     if (!image) {
@@ -136,6 +159,20 @@ export function CampaignStudio({
     () => CHANNELS.filter((channel) => platforms.includes(channel.id)).map((channel) => channel.label),
     [platforms],
   );
+
+  const metaPlatforms = useMemo(
+    () => platforms.filter((platform) => META_PUBLISH_PLATFORMS.has(platform)),
+    [platforms],
+  );
+
+  const metaReady = Boolean(
+    metaConnection?.connected
+      && !metaConnection.expired
+      && (metaConnection.ad_accounts?.length ?? 0) > 0,
+  );
+
+  const unsupportedSelected = platforms.some((platform) => !META_PUBLISH_PLATFORMS.has(platform));
+  const canPublish = metaReady && metaPlatforms.length > 0 && !unsupportedSelected;
 
   function togglePlatform(platform: CampaignPlatform) {
     setPlatforms((current) => current.includes(platform)
@@ -229,11 +266,10 @@ export function CampaignStudio({
   async function askAssistant(event: FormEvent) {
     event.preventDefault();
     const question = prompt.trim();
-    if (!question || !body.trim() || platforms.length === 0 || aiBusy) return;
+    if (!question || platforms.length === 0 || aiBusy) return;
     setMessages((current) => [...current, { role: "user", content: question }]);
     setPrompt("");
     setAiBusy(true);
-    setSuggestion(null);
     try {
       const result = await assistCampaign({
         campaign_name: name.trim() || "Untitled campaign",
@@ -241,10 +277,15 @@ export function CampaignStudio({
         platforms,
         language,
         prompt: question,
-        content: [headline.trim(), body.trim()].filter(Boolean).join("\n\n"),
+        content: [headline.trim(), body.trim()].filter(Boolean).join("\n\n") || "No draft copy supplied.",
+        ad_account_id: selectedAdAccountId || undefined,
       });
-      setMessages((current) => [...current, { role: "assistant", content: result.reply }]);
-      setSuggestion(result.reply);
+      const toolNote = result.tools_used?.length ? `\n\nMeta data tools used: ${result.tools_used.join(", ")}.` : "";
+      setMessages((current) => [...current, {
+        role: "assistant",
+        content: `${result.reply}${toolNote}`,
+        suggestedCopy: result.suggested_copy ?? undefined,
+      }]);
     } catch (err) {
       const message = err instanceof Error ? err.message : "The AI assistant is unavailable.";
       setMessages((current) => [...current, { role: "assistant", content: `I couldn’t complete that request: ${message}` }]);
@@ -253,9 +294,9 @@ export function CampaignStudio({
     }
   }
 
-  function applySuggestion() {
-    if (!suggestion) return;
-    setBody(suggestedCopy(suggestion));
+  function applySuggestion(copy: string) {
+    if (!copy) return;
+    setBody(copy);
     setNotice("AI suggestion copied into the ad copy. Review all factual claims before publishing.");
   }
 
@@ -274,6 +315,62 @@ export function CampaignStudio({
     setImage(null);
     setNotice(null);
     setError(null);
+    setAdsManagerUrl(null);
+  }
+
+  async function publishCampaign() {
+    setError(null);
+    setNotice(null);
+    setAdsManagerUrl(null);
+    if (!canPublish) {
+      setError(metaReady
+        ? "Publishing currently supports Facebook, Instagram, and WhatsApp Ads only. Deselect other channels."
+        : "Connect Meta Business with at least one ad account under Channels first.");
+      return;
+    }
+    if (!name.trim() || !body.trim() || !headline.trim() || !location.trim()) {
+      setError("Add a campaign name, location, headline, and primary text before publishing.");
+      return;
+    }
+    const nextAgeMin = clampAge(ageMin, AGE_MIN_FLOOR);
+    const nextAgeMax = clampAge(ageMax, AGE_MAX_CEILING);
+    if (nextAgeMax < nextAgeMin) {
+      setError("Maximum age must be greater than or equal to minimum age.");
+      return;
+    }
+    const confirmed = window.confirm(
+      `Create a PAUSED Meta campaign in the selected ad account? This creates Meta campaign objects but does not start delivery. Review the result in Ads Manager before activating.`,
+    );
+    if (!confirmed) return;
+    setPublishBusy(true);
+    try {
+      const result = await publishMetaCampaign({
+        campaign_name: name.trim(),
+        objective,
+        platforms: metaPlatforms as Array<"facebook" | "instagram" | "whatsapp_ads">,
+        location: location.trim(),
+        age_min: nextAgeMin,
+        age_max: nextAgeMax,
+        headline: headline.trim(),
+        body: body.trim(),
+        cta,
+        ad_account_id: selectedAdAccountId || undefined,
+        page_id: selectedPageId || undefined,
+        confirmed: true,
+      });
+      setAdsManagerUrl(result.ads_manager_url);
+      setNotice(
+        result.warning
+          ? `Created paused campaign ${result.campaign_id} and ad set ${result.ad_set_id}. ${result.warning}`
+          : result.ad_id
+            ? `Created paused Meta campaign ${result.campaign_id} with ad ${result.ad_id}. Review and activate it in Ads Manager.`
+            : `Created paused campaign ${result.campaign_id} and ad set ${result.ad_set_id}. Review it in Ads Manager before activating.`,
+      );
+    } catch (err) {
+      setError(err instanceof ApiError || err instanceof Error ? err.message : "Could not publish to Meta");
+    } finally {
+      setPublishBusy(false);
+    }
   }
 
   return (
@@ -377,7 +474,30 @@ export function CampaignStudio({
                 </label>
               </div>
             </div>
-            <p className="targeting-note">Audience targeting is stored with the draft for Meta/Instagram campaigns. Live delivery still requires a connected ad account.</p>
+            <p className="targeting-note">Audience targeting is sent to Meta when you publish. Campaigns are created as PAUSED so you can review them in Ads Manager first.</p>
+            {metaReady && (
+              <div className="form-two-col targeting-grid" style={{ marginTop: 12 }}>
+                <label className="form-field">
+                  <span>Ad account</span>
+                  <select value={selectedAdAccountId} onChange={(event) => setSelectedAdAccountId(event.target.value)}>
+                    {(metaConnection?.ad_accounts ?? []).map((account) => (
+                      <option key={account.id} value={account.id}>
+                        {account.name}{account.currency ? ` · ${account.currency}` : ""}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="form-field">
+                  <span>Facebook Page</span>
+                  <select value={selectedPageId} onChange={(event) => setSelectedPageId(event.target.value)}>
+                    {(metaConnection?.pages ?? []).length === 0 && <option value="">No Pages connected</option>}
+                    {(metaConnection?.pages ?? []).map((page) => (
+                      <option key={page.id} value={page.id}>{page.name}</option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+            )}
           </section>
 
           <section className="surface-card">
@@ -454,16 +574,42 @@ export function CampaignStudio({
 
           {error && <p className="notice error" role="alert">{error}</p>}
           {notice && <p className="notice success" role="status">{notice}</p>}
+          {adsManagerUrl && (
+            <p className="notice success" role="status">
+              <a href={adsManagerUrl} target="_blank" rel="noreferrer">Open campaign in Meta Ads Manager</a>
+            </p>
+          )}
           <div className="campaign-actions">
             <button type="button" className="secondary-button" onClick={clearDraft}>Start fresh</button>
             <button type="button" className="secondary-button" onClick={saveDraft}>Save draft</button>
-            <button type="button" className="primary-button" disabled title="Connect publishing accounts to enable this action">
-              Publish to {platforms.length || "selected"} channels <span>↗</span>
+            <button
+              type="button"
+              className="primary-button"
+              disabled={publishBusy || metaLoading || !canPublish}
+              title={canPublish ? "Create a paused Meta campaign" : "Connect Meta Business with an ad account, and select only Meta channels"}
+              onClick={() => void publishCampaign()}
+            >
+              {publishBusy
+                ? "Publishing to Meta…"
+                : `Create paused Meta campaign`}
+              {!publishBusy && <span>↗</span>}
             </button>
           </div>
           <div className="publish-note">
-            <span className="lock-icon">◈</span>
-            <p><strong>Publishing is not connected yet.</strong> Drafts are saved in this browser. Connect platform accounts before a real publish action is enabled.</p>
+            <span className="lock-icon">{metaReady ? "✓" : "◈"}</span>
+            {metaLoading ? (
+              <p>Checking Meta Business connection…</p>
+            ) : metaReady ? (
+              <p>
+                <strong>Meta Business connected.</strong>
+                {" "}
+                {unsupportedSelected
+                  ? "Deselect Google Ads or WhatsApp Business messaging to enable Publish (Meta channels only)."
+                  : "Creation requires confirmation. Campaign and ad set are created PAUSED; review them in Ads Manager before activating."}
+              </p>
+            ) : (
+              <p><strong>Meta Business is not connected.</strong> Connect an ad account under Channels before publishing.</p>
+            )}
             <button type="button" className="text-button" onClick={onOpenChannels}>View channel setup</button>
           </div>
         </div>
@@ -472,17 +618,17 @@ export function CampaignStudio({
           <section className="assistant-card">
             <div className="assistant-head">
               <span className="assistant-spark">✦</span>
-              <div><p className="step-label">AI COPY ASSISTANT</p><h3>Make the message clearer</h3></div>
+              <div><p className="step-label">AI CAMPAIGN ASSISTANT</p><h3>Copy and performance</h3></div>
               <span className="ai-mode">Server-side</span>
             </div>
-            <p className="assistant-intro">Summarize the offer or adapt copy for your selected channels. Review every factual claim before using it.</p>
+            <p className="assistant-intro">Improve copy or ask about connected Meta performance. Meta insights are read-only here; campaign changes require a separate confirmation.</p>
             <div className="assistant-messages" aria-live="polite">
               {messages.map((message, index) => (
                 <div key={`${message.role}-${index}`} className={`chat-message ${message.role}`}>
                   <span>{message.role === "assistant" ? "AI" : "You"}</span>
                   <p>{message.content}</p>
-                  {message.role === "assistant" && message.content === suggestion && (
-                    <button type="button" className="text-button" onClick={applySuggestion}>Use as primary text</button>
+                  {message.role === "assistant" && message.suggestedCopy && (
+                    <button type="button" className="text-button" onClick={() => applySuggestion(message.suggestedCopy ?? "")}>Use as primary text</button>
                   )}
                 </div>
               ))}
@@ -490,12 +636,12 @@ export function CampaignStudio({
             </div>
             <form className="assistant-compose" onSubmit={(event) => void askAssistant(event)}>
               <textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} rows={3} maxLength={2000}
-                placeholder="e.g. Summarize this in two short sentences for Telugu-speaking families" />
+                placeholder="e.g. Summarize this for Telugu-speaking families, or audit my last 14 days of Meta ads" />
               <div className="assistant-compose-foot"><small>{selectedNames.length ? selectedNames.join(" · ") : "Choose channels first"}</small>
-                <button type="submit" className="send-button" disabled={aiBusy || !prompt.trim() || !body.trim() || platforms.length === 0} aria-label="Send prompt">↑</button>
+                <button type="submit" className="send-button" disabled={aiBusy || !prompt.trim() || platforms.length === 0} aria-label="Send prompt">↑</button>
               </div>
             </form>
-            <p className="ai-privacy">Your AI key stays on the server. Use only verified property facts.</p>
+            <p className="ai-privacy">Meta metrics and campaign copy are sent to the configured AI provider for answers; access tokens stay server-side. Use only verified property facts.</p>
           </section>
 
           <section className="surface-card drafts-card">

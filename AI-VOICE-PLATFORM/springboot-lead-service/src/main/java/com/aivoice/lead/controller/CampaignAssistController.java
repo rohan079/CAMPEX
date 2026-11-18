@@ -3,7 +3,10 @@ package com.aivoice.lead.controller;
 import com.aivoice.lead.dto.Dtos.CampaignAssistRequest;
 import com.aivoice.lead.dto.Dtos.CampaignAssistResponse;
 import com.aivoice.lead.service.Exceptions.CampaignAssistException;
+import com.aivoice.lead.service.DashboardAuthService;
+import com.aivoice.lead.service.MetaConnectionStore;
 import com.aivoice.lead.service.VoiceServiceClient;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -16,15 +19,24 @@ import org.springframework.web.server.ResponseStatusException;
 public class CampaignAssistController {
 
     private final VoiceServiceClient voice;
+    private final DashboardAuthService dashboardAuth;
+    private final MetaConnectionStore metaConnections;
 
-    public CampaignAssistController(VoiceServiceClient voice) {
+    public CampaignAssistController(
+            VoiceServiceClient voice,
+            DashboardAuthService dashboardAuth,
+            MetaConnectionStore metaConnections) {
         this.voice = voice;
+        this.dashboardAuth = dashboardAuth;
+        this.metaConnections = metaConnections;
     }
 
     @PostMapping("/api/ai/campaign-assist")
-    public CampaignAssistResponse assist(@Valid @RequestBody CampaignAssistRequest request) {
+    public CampaignAssistResponse assist(HttpServletRequest httpRequest, @Valid @RequestBody CampaignAssistRequest request) {
         try {
-            return voice.campaignAssist(request);
+            String ownerEmail = dashboardAuth.requireOwnerEmail(httpRequest);
+            String accessToken = metaConnections.userAccessToken(ownerEmail);
+            return voice.campaignAssist(request, accessToken);
         } catch (CampaignAssistException exception) {
             HttpStatus status = exception.status() == 503 ? HttpStatus.SERVICE_UNAVAILABLE : HttpStatus.BAD_GATEWAY;
             throw new ResponseStatusException(status, "Campaign AI is unavailable", exception);

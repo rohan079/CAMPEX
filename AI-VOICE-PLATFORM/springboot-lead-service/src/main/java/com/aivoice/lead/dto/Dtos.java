@@ -129,10 +129,43 @@ public final class Dtos {
             @NotEmpty @Size(max = 5) List<@Pattern(regexp = "facebook|instagram|whatsapp_business|google_ads|whatsapp_ads") String> platforms,
             @NotBlank @Pattern(regexp = "en|te") String language,
             @NotBlank @Size(max = 2000) String prompt,
-            @NotBlank @Size(max = 5000) String content) {
+            @NotBlank @Size(max = 5000) String content,
+            @Size(max = 64) String adAccountId) {
     }
 
-    public record CampaignAssistResponse(String reply, String provider, String model) {
+    public record CampaignAssistResponse(
+            String reply,
+            String provider,
+            String model,
+            String suggestedCopy,
+            List<String> toolsUsed) {
+    }
+
+    /** Publish a paused Meta Ads campaign from Campaign Studio. */
+    public record MetaCampaignPublishRequest(
+            @NotBlank @Size(max = 160) String campaignName,
+            @NotBlank @Pattern(regexp = "leads|traffic|sales|awareness") String objective,
+            @NotEmpty @Size(max = 5) List<@Pattern(regexp = "facebook|instagram|whatsapp_ads") String> platforms,
+            @NotBlank @Size(max = 160) String location,
+            @jakarta.validation.constraints.Min(18) @jakarta.validation.constraints.Max(65) int ageMin,
+            @jakarta.validation.constraints.Min(18) @jakarta.validation.constraints.Max(65) int ageMax,
+            @NotBlank @Size(max = 80) String headline,
+            @NotBlank @Size(max = 1500) String body,
+            @NotBlank @Size(max = 40) String cta,
+            @Size(max = 64) String adAccountId,
+            @Size(max = 64) String pageId,
+            @jakarta.validation.constraints.Min(100) Integer dailyBudgetMinor,
+            @jakarta.validation.constraints.AssertTrue boolean confirmed) {
+    }
+
+    public record MetaCampaignPublishResponse(
+            String campaignId,
+            String adSetId,
+            String adId,
+            String adAccountId,
+            String status,
+            String adsManagerUrl,
+            String warning) {
     }
 
     /** What we ask the voice service to start. */

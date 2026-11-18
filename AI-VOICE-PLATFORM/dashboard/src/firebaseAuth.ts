@@ -18,9 +18,11 @@ const REDIRECT_PENDING_KEY = "campex.authRedirectPending";
 const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({ prompt: "select_account" });
 
+// Campex user auth only — consumer Facebook Login via Firebase (not Meta Business Login).
+// Enable `email` under Meta Use cases → Authenticate and request data with Facebook Login.
+// Ads / Pages / Instagram use Channels → Connect Meta Business (server META_LOGIN_CONFIG_ID).
 const facebookProvider = new FacebookAuthProvider();
 facebookProvider.addScope("email");
-facebookProvider.addScope("public_profile");
 facebookProvider.setCustomParameters({ display: "popup" });
 
 function providerFor(kind: SocialProvider) {

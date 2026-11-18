@@ -135,9 +135,24 @@ class MetaOAuthServiceTest {
         return store;
     }
 
+    @Test
+    void authorizationUrlUsesBusinessLoginConfigIdWhenConfigured() {
+        MetaOAuthProperties properties = new MetaOAuthProperties("app-id", "app-secret",
+                "https://campex-production.up.railway.app/oauth/meta/callback", "v27.0",
+                Base64.getEncoder().encodeToString(new byte[32]), "https://campexdashboard.vercel.app",
+                "business-config-123", SCOPES);
+        MetaOAuthService service = new MetaOAuthService(properties, mock(MetaGraphClient.class), configuredStore());
+
+        URI uri = service.authorizationUri("state-value");
+        var query = UriComponentsBuilder.fromUri(uri).build().getQueryParams();
+        assertEquals("business-config-123", query.getFirst("config_id"));
+        assertEquals(null, query.getFirst("scope"));
+    }
+
     private static MetaOAuthProperties properties() {
         return new MetaOAuthProperties("app-id", "app-secret",
                 "https://campex-production.up.railway.app/oauth/meta/callback", "v27.0",
-                Base64.getEncoder().encodeToString(new byte[32]), "https://campexdashboard.vercel.app", SCOPES);
+                Base64.getEncoder().encodeToString(new byte[32]), "https://campexdashboard.vercel.app",
+                "", SCOPES);
     }
 }

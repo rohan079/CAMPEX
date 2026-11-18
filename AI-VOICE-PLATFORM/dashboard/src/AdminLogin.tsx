@@ -57,9 +57,9 @@ export function AdminLogin({
     <main className="admin-login-shell">
       <section className="admin-login-card">
         <img className="brand-logo" src="/campex-logo.png" alt="Campex logo" />
-        <p className="eyebrow">Secure workspace</p>
+        <p className="eyebrow">Campex authentication</p>
         <h1>Sign in to Campex</h1>
-        <p className="hint">Use Google, Facebook, or email and password via Firebase.</p>
+        <p className="hint">Firebase user login: Google, Facebook, or email and password. Meta Ads accounts are connected later under Channels.</p>
 
         <div className="social-login-stack">
           <button

@@ -1,0 +1,9 @@
+Meta Ads audit workflow, adapted for CAMPEX's private MCP tools:
+
+- Use live account data only through the read-only Meta MCP tools made available for this request. Do not ask the model or user to provide an access token.
+- Analyze at least 14 days for trend claims. If the selected period is shorter, label conclusions as limited.
+- Treat frequency above roughly 3-4, a CTR decline above 15-20% over seven days, or CPM growth above 30-40% over two weeks as signals to investigate, not universal rules.
+- Do not claim audience overlap, Pixel, Conversions API, Event Match Quality, or iOS attribution health unless the tools returned the required data. State when a check is unavailable.
+- Separate observed metrics from recommendations. Preserve the account's currency and reporting dates; never invent spend, conversions, ROAS, or tracking results.
+- Provide a concise summary, data period, spend and available metrics, fatigue alerts, tracking gaps, prioritized recommendations, and a confidence level.
+- Recommend changes only. Never pause, activate, delete, or create advertising objects from an audit response. Mutations require a separate explicit confirmation flow.

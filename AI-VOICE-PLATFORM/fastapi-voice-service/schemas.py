@@ -53,12 +53,31 @@ class CampaignAssistRequest(BaseModel):
     language: Literal["en", "te"] = "en"
     prompt: str = Field(min_length=1, max_length=2000)
     content: str = Field(min_length=1, max_length=5000)
+    ad_account_id: str | None = Field(default=None, max_length=64)
 
 
 class CampaignAssistResponse(BaseModel):
     reply: str
     provider: str
     model: str
+    suggested_copy: str | None = None
+    tools_used: list[str] = Field(default_factory=list)
+
+
+class MetaCampaignPublishRequest(BaseModel):
+    campaign_name: str = Field(min_length=1, max_length=160)
+    objective: Literal["leads", "traffic", "sales", "awareness"]
+    platforms: list[Literal["facebook", "instagram", "whatsapp_ads"]] = Field(min_length=1, max_length=3)
+    location: str = Field(min_length=1, max_length=160)
+    age_min: int = Field(ge=18, le=65)
+    age_max: int = Field(ge=18, le=65)
+    headline: str = Field(min_length=1, max_length=80)
+    body: str = Field(min_length=1, max_length=1500)
+    cta: str = Field(min_length=1, max_length=40)
+    ad_account_id: str = Field(min_length=1, max_length=64)
+    page_id: str | None = Field(default=None, max_length=64)
+    daily_budget_minor: int | None = Field(default=None, ge=100)
+    confirmed: bool
 
 
 class ProviderEvent(BaseModel):

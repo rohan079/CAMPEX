@@ -3,10 +3,13 @@ package com.aivoice.lead.service;
 import com.aivoice.lead.config.AppProperties;
 import com.aivoice.lead.dto.Dtos.CampaignAssistRequest;
 import com.aivoice.lead.dto.Dtos.CampaignAssistResponse;
+import com.aivoice.lead.dto.Dtos.MetaCampaignPublishRequest;
+import com.aivoice.lead.dto.Dtos.MetaCampaignPublishResponse;
 import com.aivoice.lead.dto.Dtos.StartCallRequest;
 import com.aivoice.lead.dto.Dtos.StartCallResponse;
 import com.aivoice.lead.service.Exceptions.CampaignAssistException;
 import com.aivoice.lead.service.Exceptions.VoiceServiceException;
+import com.aivoice.lead.service.MetaGraphClient.MetaGraphException;
 import java.net.http.HttpClient;
 import java.time.Duration;
 import org.springframework.http.HttpStatusCode;
@@ -81,9 +84,15 @@ public class VoiceServiceClient {
     }
 
     /** Proxy campaign copy assistance so the browser never receives the model provider key. */
-    public CampaignAssistResponse campaignAssist(CampaignAssistRequest request) {
+    public CampaignAssistResponse campaignAssist(CampaignAssistRequest request, String metaAccessToken) {
         try {
-            CampaignAssistResponse response = campaignClient.post().uri("/api/ads/assist").body(request)
+            CampaignAssistResponse response = campaignClient.post().uri("/api/ads/assist")
+                    .headers(headers -> {
+                        if (metaAccessToken != null && !metaAccessToken.isBlank()) {
+                            headers.set("X-Meta-Access-Token", metaAccessToken);
+                        }
+                    })
+                    .body(request)
                     .retrieve().body(CampaignAssistResponse.class);
             if (response == null || response.reply() == null || response.reply().isBlank()) {
                 throw new CampaignAssistException("Campaign AI returned no copy", 502, null);
@@ -94,6 +103,31 @@ public class VoiceServiceClient {
             throw new CampaignAssistException("Campaign AI is unavailable", status, e);
         } catch (ResourceAccessException e) {
             throw new CampaignAssistException("Campaign AI service did not respond", 502, e);
+        }
+    }
+
+    /** Calls the private FastMCP publishing tool; the user's Meta token never enters the browser or logs. */
+    public MetaCampaignPublishResponse publishMetaCampaign(
+            MetaCampaignPublishRequest request,
+            String metaAccessToken) {
+        try {
+            MetaCampaignPublishResponse response = campaignClient.post().uri("/api/meta/publish")
+                    .header("X-Meta-Access-Token", metaAccessToken)
+                    .body(request)
+                    .retrieve().body(MetaCampaignPublishResponse.class);
+            if (response == null || response.campaignId() == null || response.campaignId().isBlank()) {
+                throw new MetaGraphException(502, -1, "mcp_empty_response", "Meta campaign tool returned no campaign ID");
+            }
+            return response;
+        } catch (HttpStatusCodeException e) {
+            throw new MetaGraphException(
+                    e.getStatusCode().value(),
+                    -1,
+                    "mcp_http_response",
+                    "Meta campaign creation failed (HTTP " + e.getStatusCode().value()
+                            + "). Check the account's permissions and campaign inputs.");
+        } catch (ResourceAccessException e) {
+            throw new MetaGraphException(502, -1, "mcp_transport_failure", "Meta MCP service did not respond");
         }
     }
 

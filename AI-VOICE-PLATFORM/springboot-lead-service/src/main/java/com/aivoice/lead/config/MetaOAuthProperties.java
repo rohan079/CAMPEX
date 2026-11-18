@@ -11,6 +11,8 @@ public record MetaOAuthProperties(
         String graphApiVersion,
         String tokenEncryptionKey,
         String frontendRedirectUrl,
+        /** Facebook Login for Business configuration id (Channels / ads connector only). */
+        String loginConfigId,
         List<String> oauthScopes) {
 
     private static final List<String> DEFAULT_SCOPES = List.of(
@@ -24,12 +26,17 @@ public record MetaOAuthProperties(
 
     public MetaOAuthProperties {
         graphApiVersion = graphApiVersion == null || graphApiVersion.isBlank() ? "v27.0" : graphApiVersion;
+        loginConfigId = loginConfigId == null ? "" : loginConfigId.trim();
         List<String> configuredScopes = oauthScopes == null ? List.of() : oauthScopes.stream()
                 .map(String::trim)
                 .filter(scope -> !scope.isEmpty())
                 .distinct()
                 .toList();
         oauthScopes = configuredScopes.isEmpty() ? DEFAULT_SCOPES : configuredScopes;
+    }
+
+    public boolean hasLoginConfigId() {
+        return loginConfigId != null && !loginConfigId.isBlank();
     }
 
     public boolean credentialsConfigured() {

@@ -13,6 +13,9 @@ async def campaign_assist(
     request: Request,
 ) -> CampaignAssistResponse:
     try:
-        return await request.app.state.campaign_assistant.assist(body)
+        return await request.app.state.campaign_assistant.assist(
+            body,
+            meta_access_token=request.headers.get("X-Meta-Access-Token"),
+        )
     except CampaignAssistantUnavailable as exc:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc

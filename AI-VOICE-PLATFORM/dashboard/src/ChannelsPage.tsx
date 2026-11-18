@@ -140,20 +140,20 @@ export function ChannelsPage() {
   return (
     <div className="page-stack">
       <section className="page-intro">
-        <div><p className="eyebrow">Workspace setup</p><h2>Connect your channels.</h2>
-          <p>Publishing is enabled only after the server-side connector and required platform permissions are configured.</p></div>
+        <div><p className="eyebrow">Workspace setup</p><h2>Connect Meta Ads.</h2>
+          <p>This uses Meta Business Login (separate from Firebase sign-in) to grant Campex access to your Business assets.</p></div>
         <span className="connector-summary"><i /> {connectedCount} connected</span>
       </section>
 
       <section className="connection-banner">
         <span className="connection-icon">↗</span>
-        <div><strong>Publishing connectors are not configured yet.</strong><p>The current backend can collect leads and report reach, but it does not create live Meta or Google campaigns. Drafts remain local to this browser.</p></div>
+        <div><strong>Two separate logins.</strong><p>Firebase signs you into Campex. Meta Business Login below connects ad accounts, Pages, Instagram, and campaign permissions used by Campaign Studio Publish.</p></div>
       </section>
 
       <section className="card meta-connection-panel">
         <div className="card-head">
-          <h3>Facebook &amp; Instagram</h3>
-          <p>Connect CAMPEX to retrieve Pages, Instagram professional accounts, and ad accounts granted to your admin.</p>
+          <h3>Meta Business Login</h3>
+          <p>Connect a Facebook Business account to load ad accounts, Facebook Pages, Instagram professional accounts, and campaign permissions.</p>
         </div>
         {metaNotice && <p className={`meta-notice${metaNoticeError ? " error" : ""}`} role={metaNoticeError ? "alert" : "status"}>{metaNotice}</p>}
         {metaError && <p className="banner" role="alert">{metaError}</p>}
@@ -164,7 +164,7 @@ export function ChannelsPage() {
               <small>{metaConnection.expired ? "Access expired — reconnect required" : `Connected${metaConnection.token_expires_at ? ` · expires ${new Date(metaConnection.token_expires_at).toLocaleDateString()}` : ""}`}</small>
             </div>
             <div className="meta-actions">
-              <button type="button" className="secondary-button" onClick={() => void startMetaOAuth().catch((err) => setMetaError(err instanceof Error ? err.message : "Could not start Facebook login"))}>Reconnect</button>
+              <button type="button" className="secondary-button" onClick={() => void startMetaOAuth().catch((err) => setMetaError(err instanceof Error ? err.message : "Could not start Meta Business Login"))}>Reconnect</button>
               <button type="button" className="secondary-button" disabled={metaBusy} onClick={() => void disconnectFacebook()}>{metaBusy ? "Disconnecting…" : "Disconnect"}</button>
             </div>
           </div>
@@ -180,8 +180,8 @@ export function ChannelsPage() {
             </div>
           </div>
         </> : <div className="meta-connect-actions">
-          <p className="hint">The Meta token remains encrypted in the backend and is never sent to this page. Instagram ads use the same Facebook login.</p>
-          <button type="button" className="primary-button" onClick={() => void startMetaOAuth().catch((err) => setMetaError(err instanceof Error ? err.message : "Could not start Facebook login"))}>Connect Facebook</button>
+          <p className="hint">Tokens stay encrypted on the server. This is Meta Business Login for ads assets — not the Firebase Facebook button on the sign-in screen.</p>
+          <button type="button" className="primary-button" onClick={() => void startMetaOAuth().catch((err) => setMetaError(err instanceof Error ? err.message : "Could not start Meta Business Login"))}>Connect Meta Business</button>
         </div>}
       </section>
 

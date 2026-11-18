@@ -20,6 +20,7 @@ class MetaOAuthPropertiesBindingTest {
                 "meta.graph-api-version", "v27.0",
                 "meta.token-encryption-key", "base64-test-value",
                 "meta.frontend-redirect-url", "https://campex.example",
+                "meta.login-config-id", "cfg-ads-connect",
                 "meta.oauth-scopes", "ads_management,ads_read,business_management,pages_show_list,pages_read_engagement"));
 
         MetaOAuthProperties properties = new Binder(source)
@@ -28,6 +29,7 @@ class MetaOAuthPropertiesBindingTest {
 
         assertEquals("app-id", properties.appId());
         assertEquals("v27.0", properties.graphApiVersion());
+        assertEquals("cfg-ads-connect", properties.loginConfigId());
         assertEquals(List.of("ads_management", "ads_read", "business_management", "pages_show_list", "pages_read_engagement"),
                 properties.oauthScopes());
     }

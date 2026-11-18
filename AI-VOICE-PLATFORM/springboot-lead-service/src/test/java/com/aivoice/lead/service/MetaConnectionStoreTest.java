@@ -28,7 +28,7 @@ class MetaConnectionStoreTest {
         String pageToken = "opaque-page-token";
         MetaOAuthProperties properties = new MetaOAuthProperties("id", "secret",
                 "https://campex.example/oauth/meta/callback", "v27.0",
-                Base64.getEncoder().encodeToString(new byte[32]), "https://campex.example", List.of("ads_read"));
+                Base64.getEncoder().encodeToString(new byte[32]), "https://campex.example", "", List.of("ads_read"));
         MetaTokenCipher cipher = new MetaTokenCipher(properties);
         MetaConnectionRepository connections = mock(MetaConnectionRepository.class);
         MetaConnectedAssetRepository assets = mock(MetaConnectedAssetRepository.class);
