@@ -12,12 +12,14 @@ import com.aivoice.lead.service.Exceptions.VoiceServiceException;
 import com.aivoice.lead.service.MetaGraphClient.MetaGraphException;
 import java.net.http.HttpClient;
 import java.time.Duration;
+import java.util.Map;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.HttpStatusCodeException;
 import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClient;
+import org.springframework.web.util.UriComponentsBuilder;
 
 /** The only door from this service into the FastAPI voice service. */
 @Component
@@ -126,6 +128,35 @@ public class VoiceServiceClient {
             // keep fallback
         }
         return fallback;
+    }
+
+    /** Aggregated Meta Ads MCP read snapshot for the dashboard UI. */
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> metaAdsDashboard(String metaAccessToken, String adAccountId, String datePreset) {
+        try {
+            String uri = UriComponentsBuilder.fromPath("/api/meta/dashboard")
+                    .queryParam("date_preset", datePreset == null || datePreset.isBlank() ? "last_14d" : datePreset)
+                    .queryParamIfPresent("ad_account_id",
+                            java.util.Optional.ofNullable(adAccountId).filter(value -> !value.isBlank()))
+                    .build(true)
+                    .toUriString();
+            Map<String, Object> response = campaignClient.get().uri(uri)
+                    .header("X-Meta-Access-Token", metaAccessToken)
+                    .retrieve()
+                    .body(Map.class);
+            if (response == null) {
+                throw new MetaGraphException(502, -1, "mcp_empty_response", "Meta MCP dashboard returned no data");
+            }
+            return response;
+        } catch (HttpStatusCodeException e) {
+            throw new MetaGraphException(
+                    e.getStatusCode().value(),
+                    -1,
+                    "mcp_http_response",
+                    extractUpstreamDetail(e, "Could not load Meta Ads MCP dashboard"));
+        } catch (ResourceAccessException e) {
+            throw new MetaGraphException(502, -1, "mcp_transport_failure", "Meta MCP service did not respond");
+        }
     }
 
     /** Calls the private FastMCP publishing tool; the user's Meta token never enters the browser or logs. */

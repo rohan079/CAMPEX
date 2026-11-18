@@ -8,11 +8,12 @@ import { CampaignStudio } from "./CampaignStudio";
 import { ChannelsPage } from "./ChannelsPage";
 import { ClientsPage } from "./ClientsPage";
 import { LeadReviewPage } from "./LeadReviewPage";
+import { MetaAdsPage } from "./MetaAdsPage";
 import { PerformancePage } from "./PerformancePage";
 import { num } from "./format";
 import type { Client, ClientAnalytics, Health, LeadReviewStats } from "./types";
 
-type View = "campaigns" | "performance" | "lead-review" | "channels" | "clients";
+type View = "campaigns" | "performance" | "meta-ads" | "lead-review" | "channels" | "clients";
 const RANGE_OPTIONS = [7, 30, 90];
 const CLIENT_KEY = "campaign-workspace.client";
 const DAYS_KEY = "campaign-workspace.days";
@@ -20,6 +21,7 @@ const DAYS_KEY = "campaign-workspace.days";
 const PAGE_META: Record<View, { title: string; eyebrow: string; description: string }> = {
   campaigns: { title: "Campaign studio", eyebrow: "Create and distribute", description: "Plan one creative for every channel." },
   performance: { title: "Performance", eyebrow: "Measure what matters", description: "Reach, lead quality and outcomes." },
+  "meta-ads": { title: "Meta Ads", eyebrow: "Live Meta MCP", description: "Accounts, campaigns, ads, and insights from Meta Business tools." },
   "lead-review": { title: "Lead review", eyebrow: "Keep the pipeline clean", description: "Accept qualified leads or reject them from future follow-up." },
   channels: { title: "Channels", eyebrow: "Workspace setup", description: "Manage platform publishing connections." },
   clients: { title: "Clients", eyebrow: "Workspace setup", description: "Manage the businesses in this workspace." },
@@ -193,6 +195,7 @@ export function App() {
           <p className="side-group-label">WORKSPACE</p>
           {navItem("campaigns", "✦", "Campaign studio")}
           {navItem("performance", "◴", "Performance")}
+          {navItem("meta-ads", "◈", "Meta Ads")}
           {navItem("lead-review", "✓", "Lead review", reviewStats.pending || undefined)}
           <p className="side-group-label">CONFIGURATION</p>
           {navItem("channels", "⌁", "Channels")}
@@ -229,6 +232,7 @@ export function App() {
 
         {view === "campaigns" && <CampaignStudio client={currentClient} onOpenChannels={() => setView("channels")} />}
         {view === "performance" && (analytics ? <PerformancePage data={analytics} reviewStats={reviewStats} clientId={clientId} onChanged={refresh} /> : <div className="loading-panel">{loading ? "Loading performance data…" : "Choose a client or refresh to load performance."}</div>)}
+        {view === "meta-ads" && <MetaAdsPage onOpenChannels={() => setView("channels")} />}
         {view === "lead-review" && <LeadReviewPage clientId={clientId || undefined} />}
         {view === "channels" && <ChannelsPage />}
         {view === "clients" && <ClientsPage clients={clients} clientId={clientId} onPick={selectClient} onChanged={() => { void loadClients(); refresh(); }} />}

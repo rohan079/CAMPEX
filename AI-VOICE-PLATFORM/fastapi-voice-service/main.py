@@ -5,7 +5,16 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
-from api import campaign_assistant, call_controller, edesy_webhook, media_edesy, meta_campaigns, tts_preview, voice_webhook
+from api import (
+    campaign_assistant,
+    call_controller,
+    edesy_webhook,
+    media_edesy,
+    meta_campaigns,
+    meta_dashboard,
+    tts_preview,
+    voice_webhook,
+)
 from config import get_settings
 from services.conversation_service import ConversationService
 from services.campaign_assistant import CampaignAssistantService
@@ -38,6 +47,7 @@ app = FastAPI(title="AI Voice Platform - Voice Service", version="0.1.0", lifesp
 app.include_router(call_controller.router)
 app.include_router(campaign_assistant.router)
 app.include_router(meta_campaigns.router)
+app.include_router(meta_dashboard.router)
 app.include_router(voice_webhook.router)
 app.include_router(edesy_webhook.router)
 app.include_router(tts_preview.router)

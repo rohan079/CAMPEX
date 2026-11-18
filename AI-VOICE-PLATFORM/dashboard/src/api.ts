@@ -136,6 +136,39 @@ export function publishMetaCampaign(body: MetaCampaignPublishRequest): Promise<M
   });
 }
 
+export interface MetaMcpTool {
+  name: string;
+  description: string;
+  read_only: boolean;
+}
+
+export interface MetaAdsDashboard {
+  connected: boolean;
+  tools: MetaMcpTool[];
+  businesses: Array<Record<string, unknown>>;
+  ad_accounts: Array<Record<string, unknown>>;
+  pages: Array<Record<string, unknown>>;
+  instagram_accounts: Array<Record<string, unknown>>;
+  selected_ad_account_id?: string | null;
+  account_details?: Record<string, unknown> | null;
+  campaigns: Array<Record<string, unknown>>;
+  ad_sets: Array<Record<string, unknown>>;
+  ads: Array<Record<string, unknown>>;
+  account_insights: Array<Record<string, unknown>>;
+  date_preset: string;
+}
+
+export function getMetaAdsDashboard(params?: {
+  adAccountId?: string;
+  datePreset?: string;
+}): Promise<MetaAdsDashboard> {
+  const query = new URLSearchParams();
+  if (params?.adAccountId) query.set("ad_account_id", params.adAccountId);
+  if (params?.datePreset) query.set("date_preset", params.datePreset);
+  const suffix = query.toString() ? `?${query}` : "";
+  return request<MetaAdsDashboard>(`/api/meta/ads-dashboard${suffix}`);
+}
+
 export function getHealth(): Promise<Health> {
   return request<Health>("/api/health");
 }
