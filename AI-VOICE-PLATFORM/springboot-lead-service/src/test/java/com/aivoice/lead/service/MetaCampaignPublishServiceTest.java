@@ -43,7 +43,10 @@ class MetaCampaignPublishServiceTest {
                 null,
                 List.of(new PageInfo("page-1", "Page", "Category")),
                 List.of(new AdAccountInfo("act_1", "Account", "1", 1, "INR")),
-                List.of()));
+                List.of(),
+                null,
+                "app-id",
+                false));
         when(connections.userAccessToken("user@example.test")).thenReturn("server-only-token");
 
         assertThrows(IllegalArgumentException.class,

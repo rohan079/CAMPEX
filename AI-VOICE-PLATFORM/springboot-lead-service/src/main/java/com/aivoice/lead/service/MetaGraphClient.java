@@ -87,19 +87,27 @@ public class MetaGraphClient {
     }
 
     public Token exchangeCode(String code) {
+        return exchangeCode(code, properties.appId(), properties.appSecret(), properties.oauthRedirectUri());
+    }
+
+    public Token exchangeCode(String code, String appId, String appSecret, String redirectUri) {
         Map<String, String> query = new LinkedHashMap<>();
-        query.put("client_id", properties.appId());
-        query.put("redirect_uri", properties.oauthRedirectUri());
-        query.put("client_secret", properties.appSecret());
+        query.put("client_id", appId);
+        query.put("redirect_uri", redirectUri);
+        query.put("client_secret", appSecret);
         query.put("code", code);
         return token(request("oauth/access_token", query));
     }
 
     public Token exchangeForLongLivedToken(String shortLivedToken) {
+        return exchangeForLongLivedToken(shortLivedToken, properties.appId(), properties.appSecret());
+    }
+
+    public Token exchangeForLongLivedToken(String shortLivedToken, String appId, String appSecret) {
         Map<String, String> query = new LinkedHashMap<>();
         query.put("grant_type", "fb_exchange_token");
-        query.put("client_id", properties.appId());
-        query.put("client_secret", properties.appSecret());
+        query.put("client_id", appId);
+        query.put("client_secret", appSecret);
         query.put("fb_exchange_token", shortLivedToken);
         return token(request("oauth/access_token", query));
     }

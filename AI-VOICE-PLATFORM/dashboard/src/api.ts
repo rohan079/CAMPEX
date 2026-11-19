@@ -111,6 +111,9 @@ export interface MetaConnectionStatus {
   pages: MetaPage[];
   ad_accounts: MetaAdAccount[];
   instagram_accounts?: MetaInstagramAccount[];
+  client_id?: string | null;
+  meta_app_id?: string | null;
+  using_client_app?: boolean;
 }
 
 export function getMetaConnection(): Promise<MetaConnectionStatus> {
@@ -294,6 +297,21 @@ export function updateClientVoiceSettings(
   body: { voice_agent_enabled: boolean; knowledge_base: string },
 ): Promise<Client> {
   return request<Client>(`/api/clients/${clientId}/voice-settings`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  });
+}
+
+export function updateClientMetaApp(
+  clientId: string,
+  body: {
+    meta_app_id?: string;
+    meta_app_secret?: string;
+    meta_login_config_id?: string;
+    clear?: boolean;
+  },
+): Promise<Client> {
+  return request<Client>(`/api/clients/${clientId}/meta-app`, {
     method: "PATCH",
     body: JSON.stringify(body),
   });

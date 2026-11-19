@@ -45,7 +45,10 @@ public class MetaConnectionStore {
             Instant tokenExpiresAt,
             List<PageInfo> pages,
             List<AdAccountInfo> adAccounts,
-            List<InstagramAccountInfo> instagramAccounts) {
+            List<InstagramAccountInfo> instagramAccounts,
+            String clientId,
+            String metaAppId,
+            boolean usingClientApp) {
     }
 
     public boolean encryptionConfigured() {
@@ -62,13 +65,21 @@ public class MetaConnectionStore {
     }
 
     @Transactional
-    public void save(String ownerEmail, MetaGraphClient.Profile profile, MetaGraphClient.Token token,
-                     List<String> grantedScopes, List<MetaGraphClient.Page> pages,
-                     List<MetaGraphClient.AdAccount> adAccounts,
-                     List<MetaGraphClient.InstagramAccount> instagramAccounts) {
+    public void save(
+            String ownerEmail,
+            UUID clientId,
+            String metaAppId,
+            MetaGraphClient.Profile profile,
+            MetaGraphClient.Token token,
+            List<String> grantedScopes,
+            List<MetaGraphClient.Page> pages,
+            List<MetaGraphClient.AdAccount> adAccounts,
+            List<MetaGraphClient.InstagramAccount> instagramAccounts) {
         String normalizedOwner = ownerEmail.toLowerCase(Locale.ROOT);
         MetaConnection connection = connections.findByOwnerEmail(normalizedOwner).orElseGet(MetaConnection::new);
         connection.setOwnerEmail(normalizedOwner);
+        connection.setClientId(clientId);
+        connection.setMetaAppId(metaAppId);
         connection.setMetaUserId(profile.id());
         connection.setMetaUserName(profile.name());
         MetaTokenCipher.EncryptedValue encryptedUserToken = cipher.encrypt(token.value(), "user:" + normalizedOwner);
@@ -126,7 +137,7 @@ public class MetaConnectionStore {
     public ConnectionStatus status(String ownerEmail) {
         MetaConnection connection = connections.findByOwnerEmail(ownerEmail.toLowerCase(Locale.ROOT)).orElse(null);
         if (connection == null) {
-            return new ConnectionStatus(false, false, null, null, null, List.of(), List.of(), List.of());
+            return new ConnectionStatus(false, false, null, null, null, List.of(), List.of(), List.of(), null, null, false);
         }
         List<MetaConnectedAsset> currentAssets = assets.findAllByConnectionIdOrderByAssetTypeAscNameAsc(connection.getId());
         List<PageInfo> pages = currentAssets.stream()
@@ -149,8 +160,18 @@ public class MetaConnectionStore {
         Instant now = Instant.now();
         boolean expired = isExpired(connection.getTokenExpiresAt(), now)
                 || isExpired(connection.getDataAccessExpiresAt(), now);
-        return new ConnectionStatus(true, expired, connection.getMetaUserName(), connection.getConnectedAt(),
-                connection.getTokenExpiresAt(), pages, adAccounts, instagramAccounts);
+        return new ConnectionStatus(
+                true,
+                expired,
+                connection.getMetaUserName(),
+                connection.getConnectedAt(),
+                connection.getTokenExpiresAt(),
+                pages,
+                adAccounts,
+                instagramAccounts,
+                connection.getClientId() == null ? null : connection.getClientId().toString(),
+                connection.getMetaAppId(),
+                connection.getClientId() != null);
     }
 
     @Transactional

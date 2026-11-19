@@ -6,6 +6,7 @@ import com.aivoice.lead.dto.ClientDtos.CreateClientRequest;
 import com.aivoice.lead.dto.ClientDtos.ReachImportRequest;
 import com.aivoice.lead.dto.ClientDtos.ReachImportResult;
 import com.aivoice.lead.dto.ClientDtos.RegisterAdRequest;
+import com.aivoice.lead.dto.ClientDtos.UpdateClientMetaAppRequest;
 import com.aivoice.lead.dto.ClientDtos.UpdateClientVoiceSettingsRequest;
 import com.aivoice.lead.service.ClientService;
 import jakarta.validation.Valid;
@@ -45,6 +46,13 @@ public class ClientController {
             @PathVariable String id,
             @Valid @RequestBody UpdateClientVoiceSettingsRequest body) {
         return clients.updateVoiceSettings(requireId(id), body);
+    }
+
+    @PatchMapping("/{id}/meta-app")
+    public ClientDto metaAppSettings(
+            @PathVariable String id,
+            @Valid @RequestBody UpdateClientMetaAppRequest body) {
+        return clients.updateMetaAppSettings(requireId(id), body);
     }
 
     @GetMapping("/{id}/ads")

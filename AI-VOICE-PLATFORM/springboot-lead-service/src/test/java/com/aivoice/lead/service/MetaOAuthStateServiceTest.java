@@ -23,7 +23,7 @@ class MetaOAuthStateServiceTest {
         when(repository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
         MetaOAuthStateService service = new MetaOAuthStateService(repository);
 
-        String state = service.create("operator@example.test");
+        String state = service.create("operator@example.test", null);
         var captor = org.mockito.ArgumentCaptor.forClass(MetaOAuthState.class);
         verify(repository).save(captor.capture());
         MetaOAuthState stored = captor.getValue();
@@ -31,7 +31,7 @@ class MetaOAuthStateServiceTest {
         assertEquals(43, state.length());
 
         when(repository.lockByStateHash(stored.getStateHash())).thenReturn(Optional.of(stored));
-        assertEquals("operator@example.test", service.consume(state));
+        assertEquals("operator@example.test", service.consume(state).ownerEmail());
         verify(repository).delete(stored);
 
         when(repository.lockByStateHash(stored.getStateHash())).thenReturn(Optional.empty());
@@ -42,7 +42,7 @@ class MetaOAuthStateServiceTest {
     void expiredStateCannotBeConsumed() {
         MetaOAuthStateRepository repository = mock(MetaOAuthStateRepository.class);
         MetaOAuthStateService service = new MetaOAuthStateService(repository);
-        String state = service.create("operator@example.test");
+        String state = service.create("operator@example.test", null);
         var captor = org.mockito.ArgumentCaptor.forClass(MetaOAuthState.class);
         verify(repository).save(captor.capture());
         MetaOAuthState stored = captor.getValue();

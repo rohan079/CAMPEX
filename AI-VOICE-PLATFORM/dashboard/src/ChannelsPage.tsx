@@ -15,10 +15,11 @@ const META_ERROR_MESSAGES: Record<string, string> = {
   invalid_response: "Meta returned an unexpected response. Try again.",
 };
 
-async function startMetaOAuth() {
+async function startMetaOAuth(clientId?: string) {
   const token = await auth.currentUser?.getIdToken();
   if (!token) throw new Error("Sign in before connecting Meta Business");
-  const response = await fetch("/api/oauth/meta/login", {
+  const query = clientId ? `?client_id=${encodeURIComponent(clientId)}` : "";
+  const response = await fetch(`/api/oauth/meta/login${query}`, {
     headers: {
       Accept: "application/json",
       Authorization: `Bearer ${token}`,
@@ -51,7 +52,15 @@ const CHANNELS: ChannelDef[] = [
   { id: "whatsapp_ads", mark: "↗", name: "Click-to-WhatsApp Ads", need: "Meta ad campaigns that open a WhatsApp conversation.", tone: "whatsapp-ads" },
 ];
 
-export function ChannelsPage() {
+export function ChannelsPage({
+  clientId,
+  clientName,
+  clientMetaConfigured,
+}: {
+  clientId?: string;
+  clientName?: string;
+  clientMetaConfigured?: boolean;
+}) {
   const [metaConnection, setMetaConnection] = useState<MetaConnectionStatus | null>(null);
   const [metaLoading, setMetaLoading] = useState(true);
   const [metaBusy, setMetaBusy] = useState(false);
@@ -151,6 +160,13 @@ export function ChannelsPage() {
           <h3>Meta Business</h3>
           <p>Connect once to unlock Pages, Instagram, and ad accounts for campaigns.</p>
         </div>
+        <p className="hint">
+          {clientId
+            ? clientMetaConfigured
+              ? `Connecting with ${clientName ?? "this client"}’s Meta app.`
+              : `No Meta app saved for ${clientName ?? "this client"} yet. Add App ID and Secret under Clients, or connect with the platform app.`
+            : "Select a client in the top bar to use that client’s Meta app. Without a selection, the platform Meta app is used."}
+        </p>
         {metaNotice && <p className={`meta-notice${metaNoticeError ? " error" : ""}`} role={metaNoticeError ? "alert" : "status"}>{metaNotice}</p>}
         {metaError && <p className="banner" role="alert">{metaError}</p>}
         {metaLoading ? <p className="hint">Checking connection…</p> : metaConnection?.connected ? <>
@@ -161,11 +177,11 @@ export function ChannelsPage() {
               <small>
                 {metaConnection.expired
                   ? "Access expired — reconnect required"
-                  : `Connected${metaConnection.token_expires_at ? ` · renews ${new Date(metaConnection.token_expires_at).toLocaleDateString()}` : ""}`}
+                  : `Connected${metaConnection.token_expires_at ? ` · renews ${new Date(metaConnection.token_expires_at).toLocaleDateString()}` : ""}${metaConnection.using_client_app ? " · client Meta app" : " · platform Meta app"}`}
               </small>
             </div>
             <div className="meta-actions">
-              <button type="button" className="secondary-button" onClick={() => void startMetaOAuth().catch((err) => setMetaError(err instanceof Error ? err.message : "Could not reconnect"))}>Reconnect</button>
+              <button type="button" className="secondary-button" onClick={() => void startMetaOAuth(clientId).catch((err) => setMetaError(err instanceof Error ? err.message : "Could not reconnect"))}>Reconnect</button>
               <button type="button" className="secondary-button" disabled={metaBusy} onClick={() => void disconnectFacebook()}>{metaBusy ? "Disconnecting…" : "Disconnect"}</button>
             </div>
           </div>
@@ -192,7 +208,7 @@ export function ChannelsPage() {
         </> : (
           <div className="meta-connect-actions">
             <p className="hint">Your Meta credentials stay secure and are never shown in this browser.</p>
-            <button type="button" className="primary-button" onClick={() => void startMetaOAuth().catch((err) => setMetaError(err instanceof Error ? err.message : "Could not connect"))}>Connect Meta Business</button>
+            <button type="button" className="primary-button" onClick={() => void startMetaOAuth(clientId).catch((err) => setMetaError(err instanceof Error ? err.message : "Could not connect"))}>Connect Meta Business</button>
           </div>
         )}
       </section>

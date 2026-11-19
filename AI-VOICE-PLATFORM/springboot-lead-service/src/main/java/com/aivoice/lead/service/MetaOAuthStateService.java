@@ -9,6 +9,7 @@ import java.security.SecureRandom;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Base64;
+import java.util.UUID;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -21,12 +22,15 @@ public class MetaOAuthStateService {
     private static final Duration STATE_TTL = Duration.ofMinutes(10);
     private final MetaOAuthStateRepository states;
 
+    public record PendingAuth(String ownerEmail, UUID clientId) {
+    }
+
     public MetaOAuthStateService(MetaOAuthStateRepository states) {
         this.states = states;
     }
 
     @Transactional
-    public String create(String ownerEmail) {
+    public String create(String ownerEmail, UUID clientId) {
         Instant now = Instant.now();
         states.deleteByExpiresAtBefore(now);
         byte[] bytes = new byte[32];
@@ -35,6 +39,7 @@ public class MetaOAuthStateService {
         MetaOAuthState record = new MetaOAuthState();
         record.setStateHash(hash(state));
         record.setOwnerEmail(ownerEmail);
+        record.setClientId(clientId);
         record.setCreatedAt(now);
         record.setExpiresAt(now.plus(STATE_TTL));
         states.save(record);
@@ -42,7 +47,7 @@ public class MetaOAuthStateService {
     }
 
     @Transactional
-    public String consume(String state) {
+    public PendingAuth consume(String state) {
         if (state == null || state.length() < 32 || state.length() > 128) {
             throw invalidState();
         }
@@ -50,7 +55,7 @@ public class MetaOAuthStateService {
         MetaOAuthState record = states.lockByStateHash(hash).orElseThrow(MetaOAuthStateService::invalidState);
         states.delete(record);
         if (!record.getExpiresAt().isAfter(Instant.now())) throw invalidState();
-        return record.getOwnerEmail();
+        return new PendingAuth(record.getOwnerEmail(), record.getClientId());
     }
 
     private static ResponseStatusException invalidState() {

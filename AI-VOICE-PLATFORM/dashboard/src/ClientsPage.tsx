@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import type { FormEvent } from "react";
-import { createClient, getClientAds, registerAd, updateClientVoiceSettings } from "./api";
+import { createClient, getClientAds, registerAd, updateClientMetaApp, updateClientVoiceSettings } from "./api";
 import { formatDay, num } from "./format";
 import type { Client, RegisteredAd } from "./types";
 
@@ -27,11 +27,22 @@ export function ClientsPage({
   const [settingsBusy, setSettingsBusy] = useState(false);
   const [settingsError, setSettingsError] = useState<string | null>(null);
   const [settingsSaved, setSettingsSaved] = useState(false);
+  const [metaAppId, setMetaAppId] = useState("");
+  const [metaAppSecret, setMetaAppSecret] = useState("");
+  const [metaLoginConfigId, setMetaLoginConfigId] = useState("");
+  const [metaBusy, setMetaBusy] = useState(false);
+  const [metaError, setMetaError] = useState<string | null>(null);
+  const [metaSaved, setMetaSaved] = useState(false);
 
   useEffect(() => {
     setVoiceEnabled(selectedClient?.voice_agent_enabled ?? false);
     setKnowledgeBase(selectedClient?.knowledge_base ?? "");
     setSettingsSaved(false);
+    setMetaAppId(selectedClient?.meta_app_id ?? "");
+    setMetaLoginConfigId(selectedClient?.meta_login_config_id ?? "");
+    setMetaAppSecret("");
+    setMetaSaved(false);
+    setMetaError(null);
   }, [selectedClient?.id]);
 
   async function add(event: FormEvent) {
@@ -75,6 +86,46 @@ export function ClientsPage({
       setSettingsError(err instanceof Error ? err.message : "Could not save client voice settings");
     } finally {
       setSettingsBusy(false);
+    }
+  }
+
+  async function saveMetaApp() {
+    if (!selectedClient) return;
+    setMetaBusy(true);
+    setMetaSaved(false);
+    setMetaError(null);
+    try {
+      await updateClientMetaApp(selectedClient.id, {
+        meta_app_id: metaAppId.trim(),
+        meta_app_secret: metaAppSecret.trim() || undefined,
+        meta_login_config_id: metaLoginConfigId.trim() || undefined,
+      });
+      setMetaAppSecret("");
+      setMetaSaved(true);
+      onChanged();
+    } catch (err) {
+      setMetaError(err instanceof Error ? err.message : "Could not save Meta app settings");
+    } finally {
+      setMetaBusy(false);
+    }
+  }
+
+  async function clearMetaApp() {
+    if (!selectedClient) return;
+    if (!window.confirm(`Remove Meta app credentials for ${selectedClient.name}?`)) return;
+    setMetaBusy(true);
+    setMetaError(null);
+    try {
+      await updateClientMetaApp(selectedClient.id, { clear: true });
+      setMetaAppId("");
+      setMetaAppSecret("");
+      setMetaLoginConfigId("");
+      setMetaSaved(true);
+      onChanged();
+    } catch (err) {
+      setMetaError(err instanceof Error ? err.message : "Could not clear Meta app settings");
+    } finally {
+      setMetaBusy(false);
     }
   }
 
@@ -145,6 +196,65 @@ export function ClientsPage({
         </div>
         {error && <p className="banner" role="alert">{error}</p>}
       </section>
+
+      {selectedClient && <section className="card">
+        <div className="card-head">
+          <h3>{selectedClient.name}: Meta app</h3>
+          <p>
+            Save this client’s Meta App ID, App Secret, and Login for Business config id.
+            Then select the client and connect under Channels so Campex authorizes that client’s app.
+          </p>
+        </div>
+        <p className="hint">
+          {selectedClient.meta_app_configured
+            ? `Meta app configured${selectedClient.meta_app_id ? ` · ${selectedClient.meta_app_id}` : ""}.`
+            : "No client Meta app saved yet. Without this, Channels uses the platform Meta app."}
+        </p>
+        <div className="form-grid">
+          <label className="field">
+            <span>Meta App ID</span>
+            <input value={metaAppId} onChange={(event) => { setMetaAppId(event.target.value); setMetaSaved(false); }} maxLength={64} placeholder="Client Meta app id" />
+          </label>
+          <label className="field">
+            <span>Meta App Secret</span>
+            <input
+              type="password"
+              value={metaAppSecret}
+              onChange={(event) => { setMetaAppSecret(event.target.value); setMetaSaved(false); }}
+              maxLength={256}
+              placeholder={selectedClient.meta_app_configured ? "Leave blank to keep current secret" : "App secret"}
+              autoComplete="new-password"
+            />
+          </label>
+          <label className="field grow">
+            <span>Login config ID</span>
+            <input
+              value={metaLoginConfigId}
+              onChange={(event) => { setMetaLoginConfigId(event.target.value); setMetaSaved(false); }}
+              maxLength={128}
+              placeholder="Facebook Login for Business configuration id"
+            />
+          </label>
+        </div>
+        <p className="hint">
+          In the client Meta app, add the same OAuth redirect used by Campex
+          (`…/oauth/meta/callback`) and create a Login for Business configuration with ads/pages permissions.
+        </p>
+        <div className="client-settings-footer">
+          <div>
+            {metaError && <p className="banner" role="alert">{metaError}</p>}
+            {metaSaved && <p className="hint saved">Meta app settings saved.</p>}
+            <button type="button" className="primary" disabled={metaBusy} onClick={() => void saveMetaApp()}>
+              {metaBusy ? "Saving…" : "Save Meta app"}
+            </button>
+            {selectedClient.meta_app_configured && (
+              <button type="button" className="secondary-button" disabled={metaBusy} onClick={() => void clearMetaApp()}>
+                Clear
+              </button>
+            )}
+          </div>
+        </div>
+      </section>}
 
       {selectedClient && <section className="card client-voice-settings">
         <div className="card-head"><h3>{selectedClient.name}: voice agent</h3>

@@ -6,6 +6,7 @@ import com.aivoice.lead.dto.ClientDtos.ClientDto;
 import com.aivoice.lead.dto.ClientDtos.CreateClientRequest;
 import com.aivoice.lead.dto.ClientDtos.ReachRow;
 import com.aivoice.lead.dto.ClientDtos.RegisterAdRequest;
+import com.aivoice.lead.dto.ClientDtos.UpdateClientMetaAppRequest;
 import com.aivoice.lead.dto.ClientDtos.UpdateClientVoiceSettingsRequest;
 import com.aivoice.lead.entity.Ad;
 import com.aivoice.lead.entity.Client;
@@ -35,16 +36,18 @@ public class ClientService {
     private final AdRepository ads;
     private final AnalyticsRepository analytics;
     private final AppProperties props;
+    private final MetaTokenCipher cipher;
 
     public ClientService(ClientRepository clients, LeadRepository leads, VoiceCallRepository calls,
                          AdRepository ads, AnalyticsRepository analytics,
-                         AppProperties props) {
+                         AppProperties props, MetaTokenCipher cipher) {
         this.clients = clients;
         this.leads = leads;
         this.calls = calls;
         this.ads = ads;
         this.analytics = analytics;
         this.props = props;
+        this.cipher = cipher;
     }
 
     @Transactional(readOnly = true)
@@ -79,10 +82,52 @@ public class ClientService {
         if (!request.voiceAgentEnabled()) {
             leads.findByClientId(clientId).forEach(lead -> calls.cancelQueued(lead.getId()));
         }
-        return toDto(clients.save(client), analytics.leadCountsPerClient().stream()
+        return toDto(clients.save(client), leadCount(clientId));
+    }
+
+    @Transactional
+    public ClientDto updateMetaAppSettings(UUID clientId, UpdateClientMetaAppRequest request) {
+        if (!cipher.isConfigured()) {
+            throw new IllegalStateException("Meta token encryption is not configured");
+        }
+        Client client = require(clientId);
+        if (request.clear()) {
+            client.setMetaAppId(null);
+            client.setMetaAppSecretCiphertext(null);
+            client.setMetaAppSecretNonce(null);
+            client.setMetaLoginConfigId(null);
+            return toDto(clients.save(client), leadCount(clientId));
+        }
+
+        String appId = request.metaAppId() == null ? "" : request.metaAppId().trim();
+        String secret = request.metaAppSecret() == null ? "" : request.metaAppSecret().trim();
+        String loginConfig = request.metaLoginConfigId() == null ? "" : request.metaLoginConfigId().trim();
+
+        boolean hasExistingSecret = MetaAppCredentialsResolver.hasClientCredentials(client)
+                || (client.getMetaAppSecretCiphertext() != null && client.getMetaAppSecretNonce() != null);
+        if (appId.isBlank()) {
+            throw new IllegalArgumentException("Meta App ID is required");
+        }
+        if (secret.isBlank() && !hasExistingSecret) {
+            throw new IllegalArgumentException("Meta App Secret is required");
+        }
+
+        client.setMetaAppId(appId);
+        if (!secret.isBlank()) {
+            MetaTokenCipher.EncryptedValue encrypted = cipher.encrypt(
+                    secret, MetaAppCredentialsResolver.secretAad(client.getId()));
+            client.setMetaAppSecretCiphertext(encrypted.ciphertext());
+            client.setMetaAppSecretNonce(encrypted.nonce());
+        }
+        client.setMetaLoginConfigId(loginConfig.isBlank() ? null : loginConfig);
+        return toDto(clients.save(client), leadCount(clientId));
+    }
+
+    private long leadCount(UUID clientId) {
+        return analytics.leadCountsPerClient().stream()
                 .filter(row -> row.clientId().equals(clientId))
                 .mapToLong(ClientTotals::count)
-                .findFirst().orElse(0L));
+                .findFirst().orElse(0L);
     }
 
     @Transactional(readOnly = true)
@@ -170,8 +215,19 @@ public class ClientService {
     }
 
     private ClientDto toDto(Client c, long leads) {
-        return new ClientDto(c.getId().toString(), businessName(c), c.getSlug(), businessDescription(c), leads,
-                c.isVoiceAgentEnabled(), knowledgeBase(c), c.getCreatedAt());
+        boolean metaConfigured = MetaAppCredentialsResolver.hasClientCredentials(c);
+        return new ClientDto(
+                c.getId().toString(),
+                businessName(c),
+                c.getSlug(),
+                businessDescription(c),
+                leads,
+                c.isVoiceAgentEnabled(),
+                knowledgeBase(c),
+                c.getCreatedAt(),
+                metaConfigured,
+                metaConfigured ? c.getMetaAppId() : null,
+                c.getMetaLoginConfigId());
     }
 
     private static String cleanKnowledgeBase(String knowledgeBase) {

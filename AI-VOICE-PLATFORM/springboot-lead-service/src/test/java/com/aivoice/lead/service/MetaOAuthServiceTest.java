@@ -2,8 +2,10 @@ package com.aivoice.lead.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.doThrow;
@@ -34,9 +36,9 @@ class MetaOAuthServiceTest {
     void authorizationUrlUsesCurrentGraphVersionAndRequiredPermissions() {
         MetaOAuthProperties properties = properties();
         MetaConnectionStore store = configuredStore();
-        MetaOAuthService service = new MetaOAuthService(properties, mock(MetaGraphClient.class), store);
+        MetaOAuthService service = service(properties, mock(MetaGraphClient.class), store);
 
-        URI uri = service.authorizationUri("state-value");
+        URI uri = service.authorizationUri("state-value", null);
         var query = UriComponentsBuilder.fromUri(uri).build().getQueryParams();
         assertEquals("https", uri.getScheme());
         assertEquals("www.facebook.com", uri.getHost());
@@ -44,6 +46,7 @@ class MetaOAuthServiceTest {
         assertEquals("https://campex-production.up.railway.app/oauth/meta/callback", query.getFirst("redirect_uri"));
         assertEquals(String.join(",", SCOPES), query.getFirst("scope"));
         assertEquals("state-value", query.getFirst("state"));
+        assertEquals("app-id", query.getFirst("client_id"));
     }
 
     @Test
@@ -62,8 +65,8 @@ class MetaOAuthServiceTest {
         List<MetaGraphClient.InstagramAccount> instagramAccounts = List.of(
                 new MetaGraphClient.InstagramAccount("ig-1", "campex.ig", "Campex IG", "page-1"));
 
-        when(graph.exchangeCode("code")).thenReturn(shortToken);
-        when(graph.exchangeForLongLivedToken(shortToken.value())).thenReturn(longToken);
+        when(graph.exchangeCode(eq("code"), eq("app-id"), eq("app-secret"), any())).thenReturn(shortToken);
+        when(graph.exchangeForLongLivedToken(eq(shortToken.value()), eq("app-id"), eq("app-secret"))).thenReturn(longToken);
         when(graph.permissions(longToken.value())).thenReturn(SCOPES.stream()
                 .map(scope -> new MetaGraphClient.Permission(scope, "granted")).toList());
         when(graph.profile(longToken.value())).thenReturn(profile);
@@ -71,32 +74,38 @@ class MetaOAuthServiceTest {
         when(graph.adAccounts(longToken.value())).thenReturn(accounts);
         when(graph.instagramAccounts(longToken.value())).thenReturn(instagramAccounts);
 
-        new MetaOAuthService(properties, graph, store).complete(OWNER, "code");
+        service(properties, graph, store).complete(OWNER, "code", null);
 
         verify(store).save(
-                OWNER,
-                profile,
-                longToken,
-                SCOPES.stream().sorted().toList(),
-                pages,
-                accounts,
-                instagramAccounts);
+                eq(OWNER),
+                isNull(),
+                eq("app-id"),
+                eq(profile),
+                eq(longToken),
+                eq(SCOPES.stream().sorted().toList()),
+                eq(pages),
+                eq(accounts),
+                eq(instagramAccounts));
     }
 
     @Test
     void refusesConnectionWhenAnyRequiredPermissionWasDenied() {
         MetaGraphClient graph = mock(MetaGraphClient.class);
         MetaConnectionStore store = configuredStore();
-        when(graph.exchangeCode("code")).thenReturn(new MetaGraphClient.Token("short", "bearer", null, null));
-        when(graph.exchangeForLongLivedToken("short")).thenReturn(new MetaGraphClient.Token("long", "bearer", null, null));
+        when(graph.exchangeCode(eq("code"), eq("app-id"), eq("app-secret"), any()))
+                .thenReturn(new MetaGraphClient.Token("short", "bearer", null, null));
+        when(graph.exchangeForLongLivedToken(eq("short"), eq("app-id"), eq("app-secret")))
+                .thenReturn(new MetaGraphClient.Token("long", "bearer", null, null));
         when(graph.permissions("long")).thenReturn(List.of(new MetaGraphClient.Permission("ads_read", "granted")));
 
-        MetaOAuthService service = new MetaOAuthService(properties(), graph, store);
-        assertThrows(MetaOAuthService.MissingPermissionsException.class, () -> service.complete(OWNER, "code"));
+        MetaOAuthService service = service(properties(), graph, store);
+        assertThrows(MetaOAuthService.MissingPermissionsException.class, () -> service.complete(OWNER, "code", null));
         verify(store, never()).save(
                 eq(OWNER),
-                org.mockito.ArgumentMatchers.any(),
-                org.mockito.ArgumentMatchers.any(),
+                any(),
+                any(),
+                any(),
+                any(),
                 anyList(),
                 anyList(),
                 anyList(),
@@ -108,7 +117,7 @@ class MetaOAuthServiceTest {
         MetaGraphClient graph = mock(MetaGraphClient.class);
         MetaConnectionStore store = mock(MetaConnectionStore.class);
         when(store.userAccessToken(OWNER)).thenReturn("server-side-token");
-        MetaOAuthService service = new MetaOAuthService(properties(), graph, store);
+        MetaOAuthService service = service(properties(), graph, store);
 
         service.disconnect(OWNER);
 
@@ -122,17 +131,11 @@ class MetaOAuthServiceTest {
         MetaConnectionStore store = mock(MetaConnectionStore.class);
         when(store.userAccessToken(OWNER)).thenReturn("expired-token");
         doThrow(new MetaGraphClient.MetaGraphException(400, 190)).when(graph).revokeUserToken("expired-token");
-        MetaOAuthService service = new MetaOAuthService(properties(), graph, store);
+        MetaOAuthService service = service(properties(), graph, store);
 
         service.disconnect(OWNER);
 
         verify(store).disconnect(OWNER);
-    }
-
-    private static MetaConnectionStore configuredStore() {
-        MetaConnectionStore store = mock(MetaConnectionStore.class);
-        when(store.encryptionConfigured()).thenReturn(true);
-        return store;
     }
 
     @Test
@@ -141,12 +144,34 @@ class MetaOAuthServiceTest {
                 "https://campex-production.up.railway.app/oauth/meta/callback", "v27.0",
                 Base64.getEncoder().encodeToString(new byte[32]), "https://campexdashboard.vercel.app",
                 "business-config-123", SCOPES);
-        MetaOAuthService service = new MetaOAuthService(properties, mock(MetaGraphClient.class), configuredStore());
+        MetaOAuthService service = service(properties, mock(MetaGraphClient.class), configuredStore());
 
-        URI uri = service.authorizationUri("state-value");
+        URI uri = service.authorizationUri("state-value", null);
         var query = UriComponentsBuilder.fromUri(uri).build().getQueryParams();
         assertEquals("business-config-123", query.getFirst("config_id"));
         assertEquals(null, query.getFirst("scope"));
+    }
+
+    private static MetaOAuthService service(
+            MetaOAuthProperties properties,
+            MetaGraphClient graph,
+            MetaConnectionStore store) {
+        MetaAppCredentialsResolver resolver = mock(MetaAppCredentialsResolver.class);
+        when(resolver.resolve(any())).thenAnswer(invocation -> new MetaAppCredentials(
+                properties.appId(),
+                properties.appSecret(),
+                properties.loginConfigId() == null ? "" : properties.loginConfigId(),
+                properties.oauthRedirectUri(),
+                properties.graphApiVersion(),
+                null,
+                false));
+        return new MetaOAuthService(properties, graph, store, resolver);
+    }
+
+    private static MetaConnectionStore configuredStore() {
+        MetaConnectionStore store = mock(MetaConnectionStore.class);
+        when(store.encryptionConfigured()).thenReturn(true);
+        return store;
     }
 
     private static MetaOAuthProperties properties() {

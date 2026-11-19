@@ -50,7 +50,7 @@ class MetaConnectionStoreTest {
 
         List<MetaGraphClient.InstagramAccount> instagramAccounts = List.of(
                 new MetaGraphClient.InstagramAccount("ig-1", "brand.ig", "Brand IG", "page-id"));
-        store.save(owner, profile, token, List.of("ads_read"), pages, adAccounts, instagramAccounts);
+        store.save(owner, null, "app-id", profile, token, List.of("ads_read"), pages, adAccounts, instagramAccounts);
 
         var connectionCaptor = org.mockito.ArgumentCaptor.forClass(MetaConnection.class);
         org.mockito.Mockito.verify(connections).save(connectionCaptor.capture());

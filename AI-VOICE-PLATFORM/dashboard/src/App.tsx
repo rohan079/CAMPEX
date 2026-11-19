@@ -240,7 +240,13 @@ export function App() {
         {view === "performance" && (analytics ? <PerformancePage data={analytics} reviewStats={reviewStats} clientId={clientId} onChanged={refresh} /> : <div className="loading-panel">{loading ? "Loading performance data…" : "Choose a client or refresh to load performance."}</div>)}
         {view === "meta-ads" && <MetaAdsPage onOpenChannels={() => setView("channels")} />}
         {view === "lead-review" && <LeadReviewPage clientId={clientId || undefined} />}
-        {view === "channels" && <ChannelsPage />}
+        {view === "channels" && (
+          <ChannelsPage
+            clientId={clientId || undefined}
+            clientName={currentClient?.name}
+            clientMetaConfigured={Boolean(currentClient?.meta_app_configured)}
+          />
+        )}
         {view === "clients" && <ClientsPage clients={clients} clientId={clientId} onPick={selectClient} onChanged={() => { void loadClients(); refresh(); }} />}
       </main>
     </div>

@@ -5,6 +5,7 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import java.time.Instant;
+import java.util.UUID;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
@@ -22,6 +23,9 @@ public class MetaOAuthState {
 
     @Column(name = "owner_email", nullable = false, length = 320)
     private String ownerEmail;
+
+    @Column(name = "client_id")
+    private UUID clientId;
 
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;

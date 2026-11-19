@@ -28,6 +28,13 @@ public class MetaConnection {
     @Column(name = "owner_email", nullable = false, unique = true, length = 320)
     private String ownerEmail;
 
+    /** Workspace client whose Meta app credentials were used for this connection, if any. */
+    @Column(name = "client_id")
+    private UUID clientId;
+
+    @Column(name = "meta_app_id", length = 64)
+    private String metaAppId;
+
     @Column(name = "meta_user_id", nullable = false, length = 128)
     private String metaUserId;
 

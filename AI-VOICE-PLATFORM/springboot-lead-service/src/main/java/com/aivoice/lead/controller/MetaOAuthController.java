@@ -8,8 +8,10 @@ import com.aivoice.lead.service.MetaConnectionStore.ConnectionStatus;
 import com.aivoice.lead.service.MetaOAuthService;
 import com.aivoice.lead.service.MetaOAuthService.MissingPermissionsException;
 import com.aivoice.lead.service.MetaOAuthStateService;
+import com.aivoice.lead.service.MetaOAuthStateService.PendingAuth;
 import java.net.URI;
 import java.util.Map;
+import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.CacheControl;
@@ -46,9 +48,11 @@ public class MetaOAuthController {
     }
 
     @GetMapping(value = "/login", produces = MediaType.APPLICATION_JSON_VALUE)
-    public ResponseEntity<?> loginJson(jakarta.servlet.http.HttpServletRequest request) {
+    public ResponseEntity<?> loginJson(
+            jakarta.servlet.http.HttpServletRequest request,
+            @RequestParam(value = "client_id", required = false) String clientId) {
         try {
-            URI authorizationUri = startAuthorization(request);
+            URI authorizationUri = startAuthorization(request, clientId);
             return ResponseEntity.ok()
                     .cacheControl(CacheControl.noStore())
                     .body(Map.of("authorization_url", authorizationUri.toString()));
@@ -60,29 +64,38 @@ public class MetaOAuthController {
             return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
                     .cacheControl(CacheControl.noStore())
                     .body(Map.of("detail", "Meta OAuth is not fully configured on the server"));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .cacheControl(CacheControl.noStore())
+                    .body(Map.of("detail", e.getMessage()));
         }
     }
 
     @GetMapping("/login")
-    public ResponseEntity<Void> login(jakarta.servlet.http.HttpServletRequest request) {
+    public ResponseEntity<Void> login(
+            jakarta.servlet.http.HttpServletRequest request,
+            @RequestParam(value = "client_id", required = false) String clientId) {
         try {
             return ResponseEntity.status(HttpStatus.FOUND)
-                    .location(startAuthorization(request))
+                    .location(startAuthorization(request, clientId))
                     .cacheControl(CacheControl.noStore())
                     .build();
         } catch (AuthException e) {
             return redirect("error", "login_required");
         } catch (IllegalStateException e) {
             return redirect("error", "configuration");
+        } catch (IllegalArgumentException e) {
+            return redirect("error", "configuration");
         }
     }
 
-    private URI startAuthorization(jakarta.servlet.http.HttpServletRequest request) {
+    private URI startAuthorization(jakarta.servlet.http.HttpServletRequest request, String clientIdRaw) {
         String ownerEmail = dashboardAuth.requireOwnerEmail(request);
         if (!meta.isConfigured()) {
             throw new IllegalStateException("Meta OAuth is not fully configured on the server");
         }
-        return meta.authorizationUri(states.create(ownerEmail));
+        UUID clientId = parseClientId(clientIdRaw);
+        return meta.authorizationUri(states.create(ownerEmail, clientId), clientId);
     }
 
     @GetMapping("/callback")
@@ -90,9 +103,9 @@ public class MetaOAuthController {
             @RequestParam(required = false) String code,
             @RequestParam(required = false) String state,
             @RequestParam(required = false) String error) {
-        final String ownerEmail;
+        final PendingAuth pending;
         try {
-            ownerEmail = states.consume(state);
+            pending = states.consume(state);
         } catch (ResponseStatusException e) {
             return redirect("error", "invalid_state");
         }
@@ -103,20 +116,20 @@ public class MetaOAuthController {
         if (code == null || code.isBlank()) return redirect("error", "missing_code");
 
         try {
-            meta.complete(ownerEmail, code);
+            meta.complete(pending.ownerEmail(), code, pending.clientId());
             return redirect("connected", null);
         } catch (MissingPermissionsException e) {
-            log.warn("Meta OAuth permissions were not granted for admin {}", ownerEmail);
+            log.warn("Meta OAuth permissions were not granted for admin {}", pending.ownerEmail());
             return redirect("error", "permissions");
         } catch (MetaGraphException e) {
             log.warn("Meta Graph OAuth request failed (type {}, HTTP {}, code {})",
                     e.failureType(), e.httpStatus(), e.graphCode());
             return redirect("error", e.graphCode() == 190 ? "expired_token" : "provider_error");
         } catch (IllegalStateException e) {
-            log.error("Meta OAuth setup or token encryption failed for admin {}", ownerEmail);
+            log.error("Meta OAuth setup or token encryption failed for admin {}", pending.ownerEmail());
             return redirect("error", "configuration");
         } catch (IllegalArgumentException e) {
-            log.warn("Meta OAuth callback was invalid for admin {}", ownerEmail);
+            log.warn("Meta OAuth callback was invalid for admin {}", pending.ownerEmail());
             return redirect("error", "invalid_response");
         }
     }
@@ -130,6 +143,15 @@ public class MetaOAuthController {
     public ResponseEntity<Void> disconnect(jakarta.servlet.http.HttpServletRequest request) {
         meta.disconnect(dashboardAuth.requireOwnerEmail(request));
         return ResponseEntity.noContent().cacheControl(CacheControl.noStore()).build();
+    }
+
+    private static UUID parseClientId(String raw) {
+        if (raw == null || raw.isBlank()) return null;
+        try {
+            return UUID.fromString(raw.trim());
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException("Invalid client id");
+        }
     }
 
     private ResponseEntity<Void> redirect(String result, String reason) {

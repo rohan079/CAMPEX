@@ -28,7 +28,10 @@ public final class ClientDtos {
             long leads,
             boolean voiceAgentEnabled,
             String knowledgeBase,
-            Instant createdAt) {
+            Instant createdAt,
+            boolean metaAppConfigured,
+            String metaAppId,
+            String metaLoginConfigId) {
     }
 
     public record CreateClientRequest(
@@ -42,6 +45,13 @@ public final class ClientDtos {
     public record UpdateClientVoiceSettingsRequest(
             boolean voiceAgentEnabled,
             @Size(max = 12000) String knowledgeBase) {
+    }
+
+    public record UpdateClientMetaAppRequest(
+            @Size(max = 64) String metaAppId,
+            @Size(max = 256) String metaAppSecret,
+            @Size(max = 128) String metaLoginConfigId,
+            boolean clear) {
     }
 
     public record AdDto(String id, String clientId, String externalId, String name) {

@@ -143,6 +143,9 @@ export interface Client {
   knowledge_base: string;
   leads: number;
   created_at: string | null;
+  meta_app_configured?: boolean;
+  meta_app_id?: string | null;
+  meta_login_config_id?: string | null;
 }
 
 export interface RegisteredAd {
