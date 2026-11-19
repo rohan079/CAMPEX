@@ -14,6 +14,7 @@ from fastmcp.exceptions import FastMCPError, ToolError
 
 from config import Settings
 from schemas import CampaignAssistRequest, CampaignAssistResponse
+from services.skill_registry import SkillRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -98,7 +99,19 @@ def _tool_result_text(result: Any) -> str:
     return text
 
 
+def _section(reply: str, label: str) -> str | None:
+    pattern = rf"(?is){re.escape(label)}\s*:\s*(.+?)(?=\n(?:summary|design notes|suggested headline|suggested copy|cta)\s*:|\Z)"
+    match = re.search(pattern, reply)
+    if not match:
+        return None
+    value = match.group(1).strip()
+    return value or None
+
+
 def _suggested_copy(reply: str) -> str | None:
+    direct = _section(reply, "Suggested copy")
+    if direct:
+        return direct
     match = re.search(r"suggested copy:\s*([\s\S]+)", reply, re.IGNORECASE)
     return match.group(1).strip() if match else None
 
@@ -113,10 +126,12 @@ class CampaignAssistantService:
         settings: Settings,
         transport: httpx.AsyncBaseTransport | None = None,
         meta_mcp: FastMCP | None = None,
+        skills: SkillRegistry | None = None,
     ):
         self._settings = settings
         self._transport = transport
         self._meta_mcp = meta_mcp
+        self._skills = skills or SkillRegistry()
         try:
             self._audit_skill = AUDIT_SKILL_PATH.read_text(encoding="utf-8")
         except OSError:
@@ -126,40 +141,82 @@ class CampaignAssistantService:
         self,
         request: CampaignAssistRequest,
         meta_access_token: str | None = None,
+        owner_email: str | None = None,
     ) -> CampaignAssistResponse:
         settings = self._settings
         if not settings.ai_configured:
             raise CampaignAssistantUnavailable("Campaign AI is not configured")
 
+        selected_skill = None
+        if request.skill_id:
+            selected_skill = self._skills.get_skill(request.skill_id, owner_email)
+            if selected_skill is None:
+                raise CampaignAssistantUnavailable("Selected skill was not found")
+
+        use_design = request.mode == "design" or bool(request.images)
         system = (
-            "You are a careful real-estate campaign copy assistant and Meta Ads analyst. Use only facts and "
+            "You are a careful real-estate campaign assistant and Meta Ads analyst. Use only facts and "
             "metrics actually supplied or returned by tools. Never invent prices, returns, approvals, amenities, "
             "availability, conversions, ROAS, or legal claims. Explicitly flag missing information. "
             "Use Meta tools only for live account or campaign questions. This chat exposes read-only tools; "
             "never create, pause, activate, update, or delete advertising objects. Campaign publishing is a "
             "separate user-confirmed action. For copy requests, return Summary and Suggested copy sections. "
             f"Write copy in {'natural Telugu' if request.language == 'te' else 'English'}. "
-            "For audits, follow these local skill instructions:\n"
+            "Default audit guidance:\n"
             f"{self._audit_skill}"
         )
+        if selected_skill:
+            system += (
+                f"\n\nActive skill ({selected_skill.name}):\n"
+                f"{selected_skill.body[:12_000]}"
+            )
+        if use_design:
+            system += "\n\nAd creative design guidance:\n" + self._skills.design_skill_text()
         if not meta_access_token:
-            system += "\nNo Meta Business connection is available for this request. Do not imply access to live ad data; ask the user to connect Meta under Channels."
-        user = (
+            system += (
+                "\nNo Meta Business connection is available for this request. "
+                "Do not imply access to live ad data; ask the user to connect Meta under Channels."
+            )
+
+        text_user = (
+            f"Mode: {'ad design' if use_design else 'campaign assist'}\n"
             f"Campaign: {request.campaign_name}\nObjective: {request.objective}\n"
             f"Selected channels: {', '.join(request.platforms)}\n"
             f"Selected ad account: {request.ad_account_id or 'not selected'}\n"
-            f"User request: {request.prompt}\n\nCurrent ad content:\n{request.content}"
+            f"Active skill: {(selected_skill.name if selected_skill else 'none')}\n"
+            f"User request: {request.prompt}\n\nCurrent ad content:\n{request.content or 'No draft copy supplied.'}"
         )
+        if request.images:
+            names = ", ".join(image.name for image in request.images)
+            text_user += f"\n\nUploaded creative images: {names}. Analyze them for ad design."
+
+        user_content: str | list[dict[str, Any]]
+        if request.images:
+            parts: list[dict[str, Any]] = [{"type": "text", "text": text_user}]
+            for image in request.images:
+                parts.append({
+                    "type": "image_url",
+                    "image_url": {
+                        "url": f"data:{image.mime_type};base64,{image.data_base64}",
+                    },
+                })
+            user_content = parts
+        else:
+            user_content = text_user
+
         headers = {"Content-Type": "application/json"}
         api_key = settings.campaign_ai_api_key
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"
 
+        skill_id = selected_skill.id if selected_skill else None
         try:
             async with httpx.AsyncClient(timeout=settings.ai_timeout_seconds, transport=self._transport) as client:
                 if meta_access_token and self._meta_mcp is not None:
                     try:
-                        return await self._assist_with_meta_tools(client, headers, system, user, meta_access_token)
+                        return await self._assist_with_meta_tools(
+                            client, headers, system, user_content, meta_access_token, skill_id=skill_id,
+                        )
                     except CampaignAssistantUnavailable as exc:
                         # Copy assist should still work when Meta tools are unhealthy.
                         logger.warning("Meta tool assist failed (%s); falling back to copy-only", exc)
@@ -167,8 +224,12 @@ class CampaignAssistantService:
                             "\nMeta Ads tools failed for this request. Answer from the supplied draft only "
                             "and say live Meta metrics were unavailable."
                         )
-                        return await self._complete_without_tools(client, headers, system, user)
-                return await self._complete_without_tools(client, headers, system, user)
+                        return await self._complete_without_tools(
+                            client, headers, system, user_content, skill_id=skill_id,
+                        )
+                return await self._complete_without_tools(
+                    client, headers, system, user_content, skill_id=skill_id,
+                )
         except httpx.HTTPError as exc:
             logger.warning("Campaign AI request failed (%s)", exc.__class__.__name__)
             raise CampaignAssistantUnavailable("Campaign AI endpoint could not be reached") from exc
@@ -178,27 +239,31 @@ class CampaignAssistantService:
         client: httpx.AsyncClient,
         headers: dict[str, str],
         system: str,
-        user: str,
+        user: str | list[dict[str, Any]],
+        *,
+        skill_id: str | None = None,
     ) -> CampaignAssistResponse:
         payload = {
             "model": self._settings.ai_model,
             "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
             "temperature": 0.4,
-            "max_tokens": 1000,
+            "max_tokens": 1400,
         }
         response = await self._post_completion(client, headers, payload)
-        return self._response(self._assistant_text(response), [])
+        return self._response(self._assistant_text(response), [], skill_id=skill_id)
 
     async def _assist_with_meta_tools(
         self,
         client: httpx.AsyncClient,
         headers: dict[str, str],
         system: str,
-        user: str,
+        user: str | list[dict[str, Any]],
         meta_access_token: str,
+        *,
+        skill_id: str | None = None,
     ) -> CampaignAssistResponse:
         if not meta_access_token.strip() or self._meta_mcp is None:
-            return await self._complete_without_tools(client, headers, system, user)
+            return await self._complete_without_tools(client, headers, system, user, skill_id=skill_id)
 
         try:
             async with Client(self._meta_mcp) as mcp_client:
@@ -221,13 +286,13 @@ class CampaignAssistantService:
                         "tool_choice": "auto",
                         "parallel_tool_calls": False,
                         "temperature": 0.4,
-                        "max_tokens": 1000,
+                        "max_tokens": 1400,
                     }
                     response = await self._post_completion(client, headers, payload)
                     message = response["choices"][0].get("message") or {}
                     calls = message.get("tool_calls") or []
                     if not calls:
-                        return self._response(self._assistant_text(response), tools_used)
+                        return self._response(self._assistant_text(response), tools_used, skill_id=skill_id)
 
                     messages.append(message)
                     for call in calls:
@@ -299,11 +364,21 @@ class CampaignAssistantService:
             raise CampaignAssistantUnavailable("Campaign AI returned an empty response")
         return reply.strip()
 
-    def _response(self, reply: str, tools_used: list[str]) -> CampaignAssistResponse:
+    def _response(
+        self,
+        reply: str,
+        tools_used: list[str],
+        *,
+        skill_id: str | None = None,
+    ) -> CampaignAssistResponse:
         return CampaignAssistResponse(
             reply=reply,
             provider=self._settings.ai_provider,
             model=self._settings.ai_model,
             suggested_copy=_suggested_copy(reply),
+            suggested_headline=_section(reply, "Suggested headline"),
+            suggested_cta=_section(reply, "CTA"),
+            design_notes=_section(reply, "Design notes"),
+            skill_id=skill_id,
             tools_used=tools_used,
         )

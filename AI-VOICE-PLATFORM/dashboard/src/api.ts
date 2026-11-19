@@ -3,6 +3,7 @@ import type {
   CallPage,
   CampaignAssistRequest,
   CampaignAssistResponse,
+  CampaignSkillSummary,
   LeadReviewStats,
   LeadReviewStatus,
   Client,
@@ -231,6 +232,27 @@ export function assistCampaign(body: CampaignAssistRequest): Promise<CampaignAss
   return request<CampaignAssistResponse>("/api/ai/campaign-assist", {
     method: "POST",
     body: JSON.stringify(body),
+  });
+}
+
+export function listCampaignSkills(): Promise<CampaignSkillSummary[]> {
+  return request<CampaignSkillSummary[]>("/api/ai/campaign-skills");
+}
+
+export function uploadCampaignSkill(body: {
+  markdown: string;
+  name?: string;
+  description?: string;
+}): Promise<CampaignSkillSummary> {
+  return request<CampaignSkillSummary>("/api/ai/campaign-skills", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export function deleteCampaignSkill(skillId: string): Promise<void> {
+  return request<void>(`/api/ai/campaign-skills/${encodeURIComponent(skillId)}`, {
+    method: "DELETE",
   });
 }
 

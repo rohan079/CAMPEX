@@ -5,6 +5,8 @@ import com.aivoice.lead.dto.Dtos.CampaignAssistRequest;
 import com.aivoice.lead.dto.Dtos.CampaignAssistResponse;
 import com.aivoice.lead.dto.Dtos.MetaCampaignPublishRequest;
 import com.aivoice.lead.dto.Dtos.MetaCampaignPublishResponse;
+import com.aivoice.lead.dto.Dtos.SkillSummary;
+import com.aivoice.lead.dto.Dtos.SkillUploadRequest;
 import com.aivoice.lead.dto.Dtos.StartCallRequest;
 import com.aivoice.lead.dto.Dtos.StartCallResponse;
 import com.aivoice.lead.service.Exceptions.CampaignAssistException;
@@ -12,6 +14,8 @@ import com.aivoice.lead.service.Exceptions.VoiceServiceException;
 import com.aivoice.lead.service.MetaGraphClient.MetaGraphException;
 import java.net.http.HttpClient;
 import java.time.Duration;
+import java.util.Arrays;
+import java.util.List;
 import java.util.Map;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
@@ -86,12 +90,15 @@ public class VoiceServiceClient {
     }
 
     /** Proxy campaign copy assistance so the browser never receives the model provider key. */
-    public CampaignAssistResponse campaignAssist(CampaignAssistRequest request, String metaAccessToken) {
+    public CampaignAssistResponse campaignAssist(CampaignAssistRequest request, String metaAccessToken, String ownerEmail) {
         try {
             CampaignAssistResponse response = campaignClient.post().uri("/api/ads/assist")
                     .headers(headers -> {
                         if (metaAccessToken != null && !metaAccessToken.isBlank()) {
                             headers.set("X-Meta-Access-Token", metaAccessToken);
+                        }
+                        if (ownerEmail != null && !ownerEmail.isBlank()) {
+                            headers.set("X-Owner-Email", ownerEmail);
                         }
                     })
                     .body(request)
@@ -109,6 +116,33 @@ public class VoiceServiceClient {
                     502,
                     e);
         }
+    }
+
+    public List<SkillSummary> listCampaignSkills(String ownerEmail) {
+        SkillSummary[] skills = campaignClient.get().uri("/api/ads/skills")
+                .headers(headers -> {
+                    if (ownerEmail != null && !ownerEmail.isBlank()) {
+                        headers.set("X-Owner-Email", ownerEmail);
+                    }
+                })
+                .retrieve()
+                .body(SkillSummary[].class);
+        return skills == null ? List.of() : Arrays.asList(skills);
+    }
+
+    public SkillSummary uploadCampaignSkill(SkillUploadRequest request, String ownerEmail) {
+        return campaignClient.post().uri("/api/ads/skills")
+                .headers(headers -> headers.set("X-Owner-Email", ownerEmail))
+                .body(request)
+                .retrieve()
+                .body(SkillSummary.class);
+    }
+
+    public void deleteCampaignSkill(String skillId, String ownerEmail) {
+        campaignClient.delete().uri("/api/ads/skills/{skillId}", skillId)
+                .headers(headers -> headers.set("X-Owner-Email", ownerEmail))
+                .retrieve()
+                .toBodilessEntity();
     }
 
     private static String extractUpstreamDetail(HttpStatusCodeException error, String fallback) {

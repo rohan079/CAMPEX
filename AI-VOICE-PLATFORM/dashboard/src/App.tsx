@@ -4,6 +4,7 @@ import { AdminLogin } from "./AdminLogin";
 import { getAnalytics, getClients, getHealth, getLeadReviewStats } from "./api";
 import { auth } from "./firebase";
 import { consumeStoredAuthError, signOutFirebase } from "./firebaseAuth";
+import { AiCampaignAssistant } from "./AiCampaignAssistant";
 import { CampaignStudio } from "./CampaignStudio";
 import { ChannelsPage } from "./ChannelsPage";
 import { ClientsPage } from "./ClientsPage";
@@ -13,13 +14,14 @@ import { PerformancePage } from "./PerformancePage";
 import { num } from "./format";
 import type { Client, ClientAnalytics, Health, LeadReviewStats } from "./types";
 
-type View = "campaigns" | "performance" | "meta-ads" | "lead-review" | "channels" | "clients";
+type View = "campaigns" | "assistant" | "performance" | "meta-ads" | "lead-review" | "channels" | "clients";
 const RANGE_OPTIONS = [7, 30, 90];
 const CLIENT_KEY = "campaign-workspace.client";
 const DAYS_KEY = "campaign-workspace.days";
 
 const PAGE_META: Record<View, { title: string; eyebrow: string; description: string }> = {
   campaigns: { title: "Campaign studio", eyebrow: "Create and distribute", description: "Plan one creative for every channel." },
+  assistant: { title: "AI Campaign Assistant", eyebrow: "Skills and Meta insights", description: "Run marketing skills, analyze live Meta data, and design ads from uploaded images." },
   performance: { title: "Performance", eyebrow: "Measure what matters", description: "Reach, lead quality and outcomes." },
   "meta-ads": { title: "Meta Ads", eyebrow: "Advertising", description: "Accounts, campaigns, ads, and performance from your Meta Business connection." },
   "lead-review": { title: "Lead review", eyebrow: "Keep the pipeline clean", description: "Accept qualified leads or reject them from future follow-up." },
@@ -194,6 +196,7 @@ export function App() {
         <nav className="side-nav" aria-label="Main navigation">
           <p className="side-group-label">WORKSPACE</p>
           {navItem("campaigns", "✦", "Campaign studio")}
+          {navItem("assistant", "◎", "AI Assistant")}
           {navItem("performance", "◴", "Performance")}
           {navItem("meta-ads", "◈", "Meta Ads")}
           {navItem("lead-review", "✓", "Lead review", reviewStats.pending || undefined)}
@@ -231,6 +234,7 @@ export function App() {
         </section>
 
         {view === "campaigns" && <CampaignStudio client={currentClient} onOpenChannels={() => setView("channels")} />}
+        {view === "assistant" && <AiCampaignAssistant clientName={currentClient?.name} onOpenChannels={() => setView("channels")} />}
         {view === "performance" && (analytics ? <PerformancePage data={analytics} reviewStats={reviewStats} clientId={clientId} onChanged={refresh} /> : <div className="loading-panel">{loading ? "Loading performance data…" : "Choose a client or refresh to load performance."}</div>)}
         {view === "meta-ads" && <MetaAdsPage onOpenChannels={() => setView("channels")} />}
         {view === "lead-review" && <LeadReviewPage clientId={clientId || undefined} />}

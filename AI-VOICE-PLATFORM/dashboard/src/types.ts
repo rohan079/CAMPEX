@@ -83,14 +83,23 @@ export interface LeadReviewStats {
   rejected: number;
 }
 
+export interface AssistImagePayload {
+  name: string;
+  mime_type: "image/jpeg" | "image/png" | "image/webp";
+  data_base64: string;
+}
+
 export interface CampaignAssistRequest {
   campaign_name: string;
   objective: "leads" | "traffic" | "sales" | "awareness";
   platforms: CampaignPlatform[];
   language: LanguageCode;
   prompt: string;
-  content: string;
+  content?: string;
   ad_account_id?: string;
+  skill_id?: string;
+  images?: AssistImagePayload[];
+  mode?: "assist" | "design";
 }
 
 export interface CampaignAssistResponse {
@@ -98,7 +107,19 @@ export interface CampaignAssistResponse {
   provider: string;
   model: string;
   suggested_copy?: string | null;
+  suggested_headline?: string | null;
+  suggested_cta?: string | null;
+  design_notes?: string | null;
+  skill_id?: string | null;
   tools_used?: string[];
+}
+
+export interface CampaignSkillSummary {
+  id: string;
+  name: string;
+  description: string;
+  source: "bundled" | "uploaded";
+  featured: boolean;
 }
 
 export interface CallPage {

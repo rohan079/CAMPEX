@@ -123,14 +123,24 @@ public final class Dtos {
             @NotBlank @Size(max = 10000) String summary) {
     }
 
+    public record AssistImage(
+            @NotBlank @Size(max = 120) String name,
+            @NotBlank @Pattern(regexp = "image/(jpeg|png|webp)") String mimeType,
+            @NotBlank @Size(max = 3500000) String dataBase64) {
+    }
+
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     public record CampaignAssistRequest(
             @NotBlank @Size(max = 160) String campaignName,
             @NotBlank @Pattern(regexp = "leads|traffic|sales|awareness") String objective,
             @NotEmpty @Size(max = 5) List<@Pattern(regexp = "facebook|instagram|whatsapp_business|google_ads|whatsapp_ads") String> platforms,
             @NotBlank @Pattern(regexp = "en|te") String language,
             @NotBlank @Size(max = 2000) String prompt,
-            @NotBlank @Size(max = 5000) String content,
-            @Size(max = 64) String adAccountId) {
+            @Size(max = 5000) String content,
+            @Size(max = 64) String adAccountId,
+            @Size(max = 120) String skillId,
+            @Size(max = 3) List<AssistImage> images,
+            @Pattern(regexp = "assist|design") String mode) {
     }
 
     public record CampaignAssistResponse(
@@ -138,7 +148,25 @@ public final class Dtos {
             String provider,
             String model,
             String suggestedCopy,
+            String suggestedHeadline,
+            String suggestedCta,
+            String designNotes,
+            String skillId,
             List<String> toolsUsed) {
+    }
+
+    public record SkillSummary(
+            String id,
+            String name,
+            String description,
+            String source,
+            boolean featured) {
+    }
+
+    public record SkillUploadRequest(
+            @NotBlank @Size(max = 80000) String markdown,
+            @Size(max = 120) String name,
+            @Size(max = 400) String description) {
     }
 
     /** Publish a paused Meta Ads campaign from Campaign Studio. */

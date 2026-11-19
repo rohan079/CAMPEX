@@ -20,6 +20,7 @@ from services.conversation_service import ConversationService
 from services.campaign_assistant import CampaignAssistantService
 from services.lead_client import LeadServiceClient
 from services.meta_ads_mcp import create_meta_ads_mcp
+from services.skill_registry import SkillRegistry
 from services.telephony_service import TelephonyService
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -35,7 +36,12 @@ async def lifespan(app: FastAPI):
         settings, TelephonyService(settings), LeadServiceClient(settings)
     )
     app.state.meta_ads_mcp = meta_ads_mcp
-    app.state.campaign_assistant = CampaignAssistantService(settings, meta_mcp=meta_ads_mcp)
+    app.state.skill_registry = SkillRegistry()
+    app.state.campaign_assistant = CampaignAssistantService(
+        settings,
+        meta_mcp=meta_ads_mcp,
+        skills=app.state.skill_registry,
+    )
     try:
         async with meta_ads_http_app.router.lifespan_context(meta_ads_http_app):
             yield

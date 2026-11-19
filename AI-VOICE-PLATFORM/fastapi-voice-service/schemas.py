@@ -44,16 +44,25 @@ class CallSummary(BaseModel):
     summary: str = Field(min_length=1, max_length=10000)
 
 
+class AssistImage(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    mime_type: Literal["image/jpeg", "image/png", "image/webp"]
+    data_base64: str = Field(min_length=32, max_length=3_500_000)
+
+
 class CampaignAssistRequest(BaseModel):
-    """Copy inputs sent from Spring's dashboard-authenticated AI assist endpoint."""
+    """Copy / design inputs sent from Spring's dashboard-authenticated AI assist endpoint."""
 
     campaign_name: str = Field(min_length=1, max_length=160)
     objective: Literal["leads", "traffic", "sales", "awareness"]
     platforms: list[CampaignPlatform] = Field(min_length=1, max_length=5)
     language: Literal["en", "te"] = "en"
     prompt: str = Field(min_length=1, max_length=2000)
-    content: str = Field(min_length=1, max_length=5000)
+    content: str = Field(default="", max_length=5000)  # empty allowed for image-led design prompts
     ad_account_id: str | None = Field(default=None, max_length=64)
+    skill_id: str | None = Field(default=None, max_length=120)
+    images: list[AssistImage] = Field(default_factory=list, max_length=3)
+    mode: Literal["assist", "design"] = "assist"
 
 
 class CampaignAssistResponse(BaseModel):
@@ -61,7 +70,25 @@ class CampaignAssistResponse(BaseModel):
     provider: str
     model: str
     suggested_copy: str | None = None
+    suggested_headline: str | None = None
+    suggested_cta: str | None = None
+    design_notes: str | None = None
+    skill_id: str | None = None
     tools_used: list[str] = Field(default_factory=list)
+
+
+class SkillSummary(BaseModel):
+    id: str
+    name: str
+    description: str
+    source: Literal["bundled", "uploaded"]
+    featured: bool = False
+
+
+class SkillUploadRequest(BaseModel):
+    markdown: str = Field(min_length=1, max_length=80_000)
+    name: str | None = Field(default=None, max_length=120)
+    description: str | None = Field(default=None, max_length=400)
 
 
 class MetaCampaignPublishRequest(BaseModel):
