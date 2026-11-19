@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { FormEvent } from "react";
+import type { FormEvent, KeyboardEvent } from "react";
 import {
   assistCampaign,
   deleteCampaignSkill,
@@ -19,10 +19,6 @@ type ChatMessage = {
   role: "user" | "assistant";
   content: string;
   imageUrl?: string;
-  suggestedCopy?: string;
-  suggestedHeadline?: string;
-  suggestedCta?: string;
-  designNotes?: string;
 };
 
 type LocalImage = {
@@ -32,20 +28,8 @@ type LocalImage = {
   dataBase64: string;
 };
 
-const OBJECTIVES = [
-  { id: "leads", label: "Leads" },
-  { id: "traffic", label: "Traffic" },
-  { id: "sales", label: "Sales" },
-  { id: "awareness", label: "Awareness" },
-] as const;
-
-const PLATFORMS: Array<{ id: CampaignPlatform; label: string }> = [
-  { id: "facebook", label: "Facebook" },
-  { id: "instagram", label: "Instagram" },
-  { id: "whatsapp_ads", label: "WhatsApp Ads" },
-];
-
 const MAX_IMAGE_BYTES = 2_400_000;
+const DEFAULT_PLATFORMS: CampaignPlatform[] = ["facebook", "instagram"];
 
 function fileToPayload(file: File): Promise<LocalImage> {
   return new Promise((resolve, reject) => {
@@ -86,30 +70,21 @@ export function AiCampaignAssistant({
 }) {
   const [skills, setSkills] = useState<CampaignSkillSummary[]>([]);
   const [skillId, setSkillId] = useState("");
+  const [skillMenuOpen, setSkillMenuOpen] = useState(false);
   const [skillQuery, setSkillQuery] = useState("");
   const [meta, setMeta] = useState<MetaConnectionStatus | null>(null);
   const [adAccountId, setAdAccountId] = useState("");
-  const [objective, setObjective] = useState<(typeof OBJECTIVES)[number]["id"]>("leads");
-  const [platforms, setPlatforms] = useState<CampaignPlatform[]>(["facebook", "instagram"]);
-  const [language, setLanguage] = useState<LanguageCode>("en");
-  const [campaignName, setCampaignName] = useState(clientName ? `${clientName} campaign` : "New campaign");
-  const [draftCopy, setDraftCopy] = useState("");
+  const [language] = useState<LanguageCode>("en");
   const [prompt, setPrompt] = useState("");
-  const [messages, setMessages] = useState<ChatMessage[]>([{
-    role: "assistant",
-    content: "Ask about live Meta performance, run a skill, or upload images for ad design guidance.",
-  }]);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [images, setImages] = useState<LocalImage[]>([]);
   const [busy, setBusy] = useState(false);
   const [skillBusy, setSkillBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
-  const [designHeadline, setDesignHeadline] = useState("");
-  const [designBody, setDesignBody] = useState("");
-  const [designCta, setDesignCta] = useState("Learn more");
   const messagesRef = useRef<HTMLDivElement>(null);
   const skillInputRef = useRef<HTMLInputElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const refreshSkills = useCallback(async () => {
     try {
@@ -135,21 +110,23 @@ export function AiCampaignAssistant({
     messagesRef.current?.scrollTo({ top: messagesRef.current.scrollHeight, behavior: "smooth" });
   }, [messages, busy]);
 
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = "0px";
+    el.style.height = `${Math.min(el.scrollHeight, 180)}px`;
+  }, [prompt]);
+
   const filteredSkills = useMemo(() => {
     const query = skillQuery.trim().toLowerCase();
     if (!query) return skills;
     return skills.filter((skill) =>
-      `${skill.name} ${skill.description} ${skill.source}`.toLowerCase().includes(query));
+      `${skill.name} ${skill.description}`.toLowerCase().includes(query));
   }, [skills, skillQuery]);
 
   const selectedSkill = skills.find((skill) => skill.id === skillId) ?? null;
-  const previewImage = images[0]?.previewUrl ?? null;
   const metaReady = Boolean(meta?.connected && !meta.expired);
-
-  function togglePlatform(id: CampaignPlatform) {
-    setPlatforms((current) =>
-      current.includes(id) ? current.filter((item) => item !== id) : [...current, id]);
-  }
+  const empty = messages.length === 0 && !busy;
 
   async function onUploadImages(fileList: FileList | null) {
     if (!fileList?.length) return;
@@ -160,9 +137,6 @@ export function AiCampaignAssistant({
         next.push(await fileToPayload(file));
       }
       setImages(next);
-      setNotice(next.length === 1
-        ? "Image ready for ad design. Ask the assistant for layout and copy."
-        : `${next.length} images ready for ad design.`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not load images");
     } finally {
@@ -183,7 +157,7 @@ export function AiCampaignAssistant({
       });
       await refreshSkills();
       setSkillId(saved.id);
-      setNotice(`Skill “${saved.name}” uploaded and selected.`);
+      setSkillMenuOpen(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not upload skill");
     } finally {
@@ -200,7 +174,6 @@ export function AiCampaignAssistant({
       await deleteCampaignSkill(selectedSkill.id);
       setSkillId("");
       await refreshSkills();
-      setNotice("Uploaded skill removed.");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not remove skill");
     } finally {
@@ -208,11 +181,12 @@ export function AiCampaignAssistant({
     }
   }
 
-  async function sendPrompt(event: FormEvent) {
-    event.preventDefault();
+  async function sendPrompt(event?: FormEvent) {
+    event?.preventDefault();
     const question = prompt.trim();
-    if (!question || platforms.length === 0 || busy) return;
+    if (!question || busy) return;
     const imageSnapshot = images[0]?.previewUrl;
+    const attached = [...images];
     setMessages((current) => [...current, {
       role: "user",
       content: question,
@@ -221,34 +195,29 @@ export function AiCampaignAssistant({
     setPrompt("");
     setBusy(true);
     setError(null);
+    setSkillMenuOpen(false);
     try {
       const result = await assistCampaign({
-        campaign_name: campaignName.trim() || "Untitled campaign",
-        objective,
-        platforms,
+        campaign_name: clientName ? `${clientName} campaign` : "Campaign assistant",
+        objective: "leads",
+        platforms: DEFAULT_PLATFORMS,
         language,
         prompt: question,
-        content: draftCopy.trim() || "No draft copy supplied.",
+        content: "No draft copy supplied.",
         ad_account_id: adAccountId || undefined,
         skill_id: skillId || undefined,
-        mode: images.length ? "design" : "assist",
-        images: images.map((image) => ({
+        mode: attached.length ? "design" : "assist",
+        images: attached.map((image) => ({
           name: image.name,
           mime_type: image.mime,
           data_base64: image.dataBase64,
         })),
       });
-      if (result.suggested_headline) setDesignHeadline(result.suggested_headline.split("\n")[0].slice(0, 80));
-      if (result.suggested_copy) setDesignBody(result.suggested_copy);
-      if (result.suggested_cta) setDesignCta(result.suggested_cta.split("\n")[0].slice(0, 40));
       setMessages((current) => [...current, {
         role: "assistant",
         content: result.reply,
-        suggestedCopy: result.suggested_copy ?? undefined,
-        suggestedHeadline: result.suggested_headline ?? undefined,
-        suggestedCta: result.suggested_cta ?? undefined,
-        designNotes: result.design_notes ?? undefined,
       }]);
+      setImages([]);
     } catch (err) {
       const message = err instanceof Error ? err.message : "The assistant is unavailable.";
       setMessages((current) => [...current, {
@@ -260,267 +229,195 @@ export function AiCampaignAssistant({
     }
   }
 
-  function applySuggestion(message: ChatMessage) {
-    if (message.suggestedHeadline) setDesignHeadline(message.suggestedHeadline.split("\n")[0].slice(0, 80));
-    if (message.suggestedCopy) {
-      setDesignBody(message.suggestedCopy);
-      setDraftCopy(message.suggestedCopy);
+  function onComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      void sendPrompt();
     }
-    if (message.suggestedCta) setDesignCta(message.suggestedCta.split("\n")[0].slice(0, 40));
-    setNotice("Suggestion applied to the design preview. Review facts before publishing.");
   }
 
   return (
-    <div className="assistant-page">
-      <aside className="assistant-side">
-        <section className="panel-card">
-          <div className="panel-head">
-            <div>
-              <p className="step-label">Skills</p>
-              <h3>Playbooks</h3>
-            </div>
-            <button
-              type="button"
-              className="secondary-button"
-              disabled={skillBusy}
-              onClick={() => skillInputRef.current?.click()}
-            >
-              {skillBusy ? "Uploading…" : "Upload skill"}
-            </button>
-            <input
-              ref={skillInputRef}
-              type="file"
-              accept=".md,text/markdown,text/plain"
-              hidden
-              onChange={(event) => void onUploadSkill(event.target.files)}
-            />
-          </div>
-          <label className="form-field">
-            <span>Search</span>
-            <input
-              value={skillQuery}
-              onChange={(event) => setSkillQuery(event.target.value)}
-              placeholder="Audit, creative, budget…"
-            />
-          </label>
-          <div className="skill-list" role="listbox" aria-label="Campaign skills">
-            {filteredSkills.map((skill) => (
-              <button
-                key={skill.id}
-                type="button"
-                role="option"
-                aria-selected={skill.id === skillId}
-                className={`skill-chip${skill.id === skillId ? " active" : ""}`}
-                onClick={() => setSkillId(skill.id)}
-              >
-                <strong>{skill.name}</strong>
-                <small>{skill.source === "uploaded" ? "Uploaded" : skill.featured ? "Featured" : "Library"}</small>
-                <span>{skill.description}</span>
-              </button>
-            ))}
-            {!filteredSkills.length && <p className="empty-state">No skills match that search.</p>}
-          </div>
-          {selectedSkill?.source === "uploaded" && (
-            <button type="button" className="text-button" disabled={skillBusy} onClick={() => void removeUploadedSkill()}>
-              Remove uploaded skill
-            </button>
-          )}
-        </section>
-
-        <section className="panel-card">
-          <div className="panel-head">
-            <div>
-              <p className="step-label">Context</p>
-              <h3>Campaign setup</h3>
-            </div>
-          </div>
-          <label className="form-field">
-            <span>Campaign name</span>
-            <input value={campaignName} onChange={(event) => setCampaignName(event.target.value)} />
-          </label>
-          <label className="form-field">
-            <span>Objective</span>
-            <select value={objective} onChange={(event) => setObjective(event.target.value as typeof objective)}>
-              {OBJECTIVES.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
-            </select>
-          </label>
-          <div className="platform-row">
-            {PLATFORMS.map((platform) => (
-              <button
-                key={platform.id}
-                type="button"
-                className={`platform-pill${platforms.includes(platform.id) ? " active" : ""}`}
-                aria-pressed={platforms.includes(platform.id)}
-                onClick={() => togglePlatform(platform.id)}
-              >
-                {platform.label}
-              </button>
-            ))}
-          </div>
-          <label className="form-field">
-            <span>Language</span>
-            <select value={language} onChange={(event) => setLanguage(event.target.value as LanguageCode)}>
-              <option value="en">English</option>
-              <option value="te">Telugu</option>
-            </select>
-          </label>
-          <label className="form-field">
-            <span>Ad account</span>
-            <select
-              value={adAccountId}
-              onChange={(event) => setAdAccountId(event.target.value)}
-              disabled={!metaReady}
-            >
-              <option value="">{metaReady ? "Select ad account" : "Connect Meta under Channels"}</option>
-              {(meta?.ad_accounts ?? []).map((account) => (
-                <option key={account.id} value={account.id}>{account.name || account.id}</option>
-              ))}
-            </select>
-          </label>
-          {!metaReady && (
-            <p className="inline-hint">
-              Live Meta insights need a Business connection.{" "}
-              <button type="button" className="text-button" onClick={onOpenChannels}>Open Channels</button>
+    <div className="gpt-shell">
+      <div className="gpt-thread" ref={messagesRef}>
+        {empty ? (
+          <div className="gpt-empty">
+            <div className="gpt-empty-mark" aria-hidden="true">✦</div>
+            <h2>How can I help with your campaigns?</h2>
+            <p>
+              {metaReady
+                ? "Ask about Meta performance, run a skill, or attach images for ad design."
+                : "Connect Meta under Channels for live insights, or ask about copy and creative now."}
             </p>
-          )}
-          <label className="form-field">
-            <span>Draft copy (optional)</span>
-            <textarea
-              rows={4}
-              value={draftCopy}
-              onChange={(event) => setDraftCopy(event.target.value)}
-              placeholder="Paste existing ad copy for the assistant to refine."
-            />
-          </label>
-        </section>
-      </aside>
-
-      <section className="assistant-main panel-card">
-        <div className="assistant-head">
-          <span className="assistant-spark" aria-hidden="true">✦</span>
-          <div>
-            <p className="step-label">AI Campaign Assistant</p>
-            <h3>{selectedSkill?.name ?? "Choose a skill"}</h3>
-          </div>
-          <span className="ai-mode">{metaReady ? "Live Meta" : "Draft mode"}</span>
-        </div>
-        <p className="assistant-intro">
-          Uses your selected skill with live Meta data when connected. Upload images to get ad layout and copy suggestions.
-        </p>
-        {error && <p className="notice error" role="alert">{error}</p>}
-        {notice && <p className="notice success" role="status">{notice}</p>}
-
-        <div className="assistant-messages assistant-messages-tall" ref={messagesRef}>
-          {messages.map((message, index) => (
-            <article key={`${message.role}-${index}`} className={`chat-message ${message.role}`}>
-              <span>{message.role === "user" ? "You" : "Assistant"}</span>
-              {message.imageUrl && <img className="chat-thumb" src={message.imageUrl} alt="" />}
-              <p>{message.content}</p>
-              {(message.suggestedCopy || message.suggestedHeadline) && (
-                <button type="button" className="text-button" onClick={() => applySuggestion(message)}>
-                  Apply to design preview
+            {!metaReady && (
+              <button type="button" className="text-button" onClick={onOpenChannels}>Open Channels</button>
+            )}
+            <div className="gpt-starters">
+              {[
+                "Audit my Meta account for wasted spend",
+                "Write 5 ad copy variants for lead gen",
+                "Review this creative for Instagram feed",
+              ].map((starter) => (
+                <button
+                  key={starter}
+                  type="button"
+                  className="gpt-starter"
+                  onClick={() => {
+                    setPrompt(starter);
+                    textareaRef.current?.focus();
+                  }}
+                >
+                  {starter}
                 </button>
-              )}
-            </article>
-          ))}
-          {busy && <p className="thinking"><i /><span>Working with your skill and Meta data…</span></p>}
-        </div>
-
-        <form className="assistant-compose" onSubmit={(event) => void sendPrompt(event)}>
-          <div className="compose-toolbar">
-            <button type="button" className="secondary-button" onClick={() => imageInputRef.current?.click()}>
-              {images.length ? `Images (${images.length})` : "Upload images"}
-            </button>
-            <input
-              ref={imageInputRef}
-              type="file"
-              accept="image/jpeg,image/png,image/webp"
-              multiple
-              hidden
-              onChange={(event) => void onUploadImages(event.target.files)}
-            />
-            {images.length > 0 && (
-              <button type="button" className="text-button" onClick={() => setImages([])}>Clear images</button>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <div className="gpt-messages">
+            {messages.map((message, index) => (
+              <article key={`${message.role}-${index}`} className={`gpt-row ${message.role}`}>
+                <div className="gpt-avatar" aria-hidden="true">{message.role === "user" ? "You" : "AI"}</div>
+                <div className="gpt-bubble">
+                  {message.imageUrl && <img className="gpt-attach" src={message.imageUrl} alt="" />}
+                  <p>{message.content}</p>
+                </div>
+              </article>
+            ))}
+            {busy && (
+              <article className="gpt-row assistant">
+                <div className="gpt-avatar" aria-hidden="true">AI</div>
+                <div className="gpt-bubble"><p className="thinking"><i /><span>Thinking…</span></p></div>
+              </article>
             )}
           </div>
+        )}
+      </div>
+
+      <div className="gpt-dock">
+        {error && <p className="notice error gpt-error" role="alert">{error}</p>}
+
+        <form className="gpt-composer" onSubmit={(event) => void sendPrompt(event)}>
           {images.length > 0 && (
-            <div className="image-strip">
+            <div className="gpt-image-strip">
               {images.map((image) => (
                 <figure key={image.name}>
                   <img src={image.previewUrl} alt={image.name} />
-                  <figcaption>{image.name}</figcaption>
+                  <button
+                    type="button"
+                    aria-label={`Remove ${image.name}`}
+                    onClick={() => setImages((current) => current.filter((item) => item.name !== image.name))}
+                  >
+                    ×
+                  </button>
                 </figure>
               ))}
             </div>
           )}
+
           <textarea
-            rows={3}
+            ref={textareaRef}
+            rows={1}
             value={prompt}
             onChange={(event) => setPrompt(event.target.value)}
-            placeholder={images.length
-              ? "Ask for ad design: safer text zones, headline, CTA, and mobile feed fit…"
-              : "Ask for an audit, copy variants, budget pacing, or creative feedback…"}
+            onKeyDown={onComposerKeyDown}
+            placeholder="Message AI Campaign Assistant"
           />
-          <div className="assistant-compose-foot">
-            <small>{selectedSkill ? `Skill: ${selectedSkill.name}` : "No skill selected"}</small>
-            <button className="send-button" type="submit" disabled={busy || !prompt.trim() || platforms.length === 0} aria-label="Send">
+
+          <div className="gpt-composer-bar">
+            <div className="gpt-tools">
+              <div className="gpt-skill-wrap">
+                <button
+                  type="button"
+                  className={`gpt-tool${skillMenuOpen ? " active" : ""}`}
+                  onClick={() => setSkillMenuOpen((open) => !open)}
+                >
+                  {selectedSkill?.name ?? "Skill"}
+                </button>
+                {skillMenuOpen && (
+                  <div className="gpt-skill-menu" role="listbox" aria-label="Skills">
+                    <input
+                      value={skillQuery}
+                      onChange={(event) => setSkillQuery(event.target.value)}
+                      placeholder="Search skills"
+                      autoFocus
+                    />
+                    <div className="gpt-skill-options">
+                      {filteredSkills.map((skill) => (
+                        <button
+                          key={skill.id}
+                          type="button"
+                          role="option"
+                          aria-selected={skill.id === skillId}
+                          className={skill.id === skillId ? "active" : undefined}
+                          onClick={() => {
+                            setSkillId(skill.id);
+                            setSkillMenuOpen(false);
+                            setSkillQuery("");
+                          }}
+                        >
+                          <strong>{skill.name}</strong>
+                          <span>{skill.source === "uploaded" ? "Uploaded" : skill.featured ? "Featured" : "Library"}</span>
+                        </button>
+                      ))}
+                      {!filteredSkills.length && <p>No skills found</p>}
+                    </div>
+                    <div className="gpt-skill-actions">
+                      <button
+                        type="button"
+                        disabled={skillBusy}
+                        onClick={() => skillInputRef.current?.click()}
+                      >
+                        {skillBusy ? "Uploading…" : "Upload skill"}
+                      </button>
+                      {selectedSkill?.source === "uploaded" && (
+                        <button type="button" disabled={skillBusy} onClick={() => void removeUploadedSkill()}>
+                          Remove
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <button
+                type="button"
+                className="gpt-tool"
+                onClick={() => imageInputRef.current?.click()}
+              >
+                {images.length ? `Image · ${images.length}` : "Upload image"}
+              </button>
+              <input
+                ref={skillInputRef}
+                type="file"
+                accept=".md,text/markdown,text/plain"
+                hidden
+                onChange={(event) => void onUploadSkill(event.target.files)}
+              />
+              <input
+                ref={imageInputRef}
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                multiple
+                hidden
+                onChange={(event) => void onUploadImages(event.target.files)}
+              />
+            </div>
+
+            <button
+              className="gpt-send"
+              type="submit"
+              disabled={busy || !prompt.trim()}
+              aria-label="Send message"
+            >
               ↑
             </button>
           </div>
         </form>
-      </section>
 
-      <aside className="assistant-preview">
-        <section className="panel-card design-preview-card">
-          <div className="panel-head">
-            <div>
-              <p className="step-label">Ad design</p>
-              <h3>Feed preview</h3>
-            </div>
-          </div>
-          <div className="design-preview">
-            <div className="preview-account">
-              <span className="channel-mark facebook">f</span>
-              <span>
-                <strong>{clientName ?? "Your business"}</strong>
-                <small>Sponsored · Preview only</small>
-              </span>
-              <span className="preview-menu">···</span>
-            </div>
-            <p className="design-body-copy">{designBody || "Primary text will appear here after the assistant suggests copy."}</p>
-            <div className={`design-media${previewImage ? "" : " empty"}`}>
-              {previewImage ? (
-                <img src={previewImage} alt="Uploaded creative" />
-              ) : (
-                <span>Upload an image to preview the creative</span>
-              )}
-              {(designHeadline || designCta) && previewImage && (
-                <div className="design-overlay">
-                  {designHeadline && <strong>{designHeadline}</strong>}
-                  {designCta && <em>{designCta}</em>}
-                </div>
-              )}
-            </div>
-            <div className="design-cta-row">
-              <span>{designHeadline || "Headline"}</span>
-              <button type="button" className="secondary-button" disabled>{designCta || "CTA"}</button>
-            </div>
-          </div>
-          <label className="form-field">
-            <span>Headline</span>
-            <input value={designHeadline} onChange={(event) => setDesignHeadline(event.target.value)} maxLength={80} />
-          </label>
-          <label className="form-field">
-            <span>Primary text</span>
-            <textarea rows={4} value={designBody} onChange={(event) => setDesignBody(event.target.value)} />
-          </label>
-          <label className="form-field">
-            <span>CTA</span>
-            <input value={designCta} onChange={(event) => setDesignCta(event.target.value)} maxLength={40} />
-          </label>
-          <p className="ai-privacy">Preview only. Publishing stays in Campaign studio after you review facts.</p>
-        </section>
-      </aside>
+        <p className="gpt-footnote">
+          {selectedSkill ? `Using ${selectedSkill.name}` : "No skill selected"}
+          {metaReady ? " · Live Meta connected" : " · Draft mode"}
+        </p>
+      </div>
     </div>
   );
 }

@@ -212,7 +212,7 @@ export function App() {
         </div>
       </aside>
 
-      <main className="app-main">
+      <main className={`app-main${view === "assistant" ? " assistant-mode" : ""}`}>
         <header className="workspace-topbar">
           <div className="breadcrumbs"><span>Workspace</span><b>/</b><strong>{meta.title}</strong></div>
           <div className="topbar-controls">
@@ -223,15 +223,17 @@ export function App() {
               {RANGE_OPTIONS.map((value) => <button key={value} type="button" aria-pressed={days === value} onClick={() => selectDays(value)}>{value}d</button>)}
             </div>}
             <button type="button" className="icon-button" onClick={refresh} aria-label="Refresh data" title="Refresh data">↻</button>
-            <button type="button" className="primary-button top-create" onClick={() => setView("campaigns")}>＋ New campaign</button>
+            {view !== "assistant" && <button type="button" className="primary-button top-create" onClick={() => setView("campaigns")}>＋ New campaign</button>}
             <button type="button" className="secondary-button" onClick={() => void signOut()}>Sign out</button>
           </div>
         </header>
 
         {error && <div className="global-error" role="alert"><span>{error}</span><button type="button" onClick={() => setError(null)}>Dismiss</button></div>}
-        <section className="view-heading"><div><p className="eyebrow">{meta.eyebrow}</p><h1>{meta.title}</h1><p>{meta.description}</p></div>
-          {view === "performance" && <span className="range-caption">{scopeName} · last {days} days</span>}
-        </section>
+        {view !== "assistant" && (
+          <section className="view-heading"><div><p className="eyebrow">{meta.eyebrow}</p><h1>{meta.title}</h1><p>{meta.description}</p></div>
+            {view === "performance" && <span className="range-caption">{scopeName} · last {days} days</span>}
+          </section>
+        )}
 
         {view === "campaigns" && <CampaignStudio client={currentClient} onOpenChannels={() => setView("channels")} />}
         {view === "assistant" && <AiCampaignAssistant clientName={currentClient?.name} onOpenChannels={() => setView("channels")} />}
