@@ -64,6 +64,16 @@ class Settings(BaseSettings):
     ai_image_size: str = "1024x1024"
     ai_image_timeout_seconds: float = 90
     ai_image_enabled: bool = True
+    # Performance intelligence (explanations, Q&A, creative drafts). Metrics are computed by the lead service;
+    # the provider only explains them. Unset provider = reuse AI_PROVIDER / AI_MODEL.
+    performance_ai_provider: Literal["openai", "openai_compatible", "anthropic", ""] = ""
+    performance_ai_model: str = ""
+    performance_ai_timeout_seconds: float = 60
+    anthropic_api_key: str = ""
+    anthropic_model: str = "claude-opus-5-5"
+    anthropic_effort: Literal["low", "medium", "high", "xhigh", "max"] = "medium"
+    # Server-side refusal fallback on the Claude API ("default" routing). Disable on platforms without it.
+    anthropic_refusal_fallback: bool = True
 
     # Meta Marketing API version used by the private Meta Ads MCP server.
     meta_graph_api_version: str = Field(default="v27.0", pattern=r"^v\d+\.\d+$")

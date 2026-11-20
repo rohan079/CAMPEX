@@ -52,6 +52,11 @@ public class ApiExceptionHandler {
                 .body(Map.of("detail", e.getMessage()));
     }
 
+    @ExceptionHandler(com.aivoice.lead.service.performance.PerformanceAiClient.AiUnavailableException.class)
+    public ResponseEntity<Map<String, String>> aiUnavailable(RuntimeException e) {
+        return body(HttpStatus.SERVICE_UNAVAILABLE, e.getMessage());
+    }
+
     @ExceptionHandler(AuthException.class)
     public ResponseEntity<Map<String, String>> authentication(AuthException e) {
         return body(e.status(), e.getMessage());

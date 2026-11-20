@@ -12,6 +12,7 @@ from api import (
     media_edesy,
     meta_campaigns,
     meta_dashboard,
+    performance,
     tts_preview,
     voice_webhook,
 )
@@ -52,6 +53,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="AI Voice Platform - Voice Service", version="0.1.0", lifespan=lifespan)
 app.include_router(call_controller.router)
 app.include_router(campaign_assistant.router)
+app.include_router(performance.router)
 app.include_router(meta_campaigns.router)
 app.include_router(meta_dashboard.router)
 app.include_router(voice_webhook.router)

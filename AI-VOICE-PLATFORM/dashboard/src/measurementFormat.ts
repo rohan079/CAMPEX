@@ -23,3 +23,12 @@ export function labelize(value: string | null | undefined): string {
   if (!value) return "—";
   return value.toLowerCase().replaceAll("_", " ").replace(/^./, (ch) => ch.toUpperCase());
 }
+
+/** Last `days` complete days, ending yesterday (Meta's most recent day is provisional). */
+export function completeDays(days: number, today = new Date()): DateRange {
+  const iso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  const to = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1);
+  const from = new Date(to);
+  from.setDate(from.getDate() - (days - 1));
+  return { from: iso(from), to: iso(to) };
+}

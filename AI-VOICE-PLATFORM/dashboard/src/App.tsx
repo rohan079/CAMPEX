@@ -7,6 +7,7 @@ import { consumeStoredAuthError, signOutFirebase } from "./firebaseAuth";
 import { AiCampaignAssistant } from "./AiCampaignAssistant";
 import { AttributionPage, MeasurementPage } from "./AttributionPage";
 import { CrmPipelinePage } from "./CrmPipelinePage";
+import { PerformanceIntelligencePage } from "./PerformanceIntelligencePage";
 import { SalesAttributionPage } from "./SalesAttributionPage";
 import { SiteVisitsPage } from "./SiteVisitsPage";
 import { TrackingPage } from "./TrackingPage";
@@ -20,9 +21,9 @@ import { num } from "./format";
 import type { Client, ClientAnalytics, Health, LeadReviewStats } from "./types";
 
 type View = "campaigns" | "assistant" | "performance" | "meta-ads" | "lead-review" | "channels" | "clients"
-  | "measurement" | "tracking" | "attribution" | "crm" | "site-visits" | "sales";
+  | "measurement" | "tracking" | "attribution" | "crm" | "site-visits" | "sales" | "intelligence";
 /** Views whose data depends on the selected period. */
-const RANGED_VIEWS: View[] = ["performance", "measurement", "tracking", "attribution", "crm"];
+const RANGED_VIEWS: View[] = ["performance", "measurement", "tracking", "attribution", "crm", "intelligence"];
 const RANGE_OPTIONS = [7, 30, 90];
 const CLIENT_KEY = "campaign-workspace.client";
 const DAYS_KEY = "campaign-workspace.days";
@@ -41,6 +42,7 @@ const PAGE_META: Record<View, { title: string; eyebrow: string; description: str
   crm: { title: "CRM pipeline", eyebrow: "Sales operations", description: "Assign, qualify and move leads to a sale." },
   "site-visits": { title: "Site visits", eyebrow: "Sales operations", description: "Schedule and track property visits." },
   sales: { title: "Sales", eyebrow: "Lead to sale", description: "Bookings, payments and confirmed revenue." },
+  intelligence: { title: "Performance intelligence", eyebrow: "AI optimization", description: "Evidence-based recommendations, budgets, creatives, audiences, anomalies and experiments." },
 };
 
 function initialDays(): number {
@@ -215,6 +217,7 @@ export function App() {
           {navItem("meta-ads", "◈", "Meta Ads")}
           {navItem("lead-review", "✓", "Lead review", reviewStats.pending || undefined)}
           <p className="side-group-label">MEASUREMENT</p>
+          {navItem("intelligence", "✧", "Performance AI")}
           {navItem("measurement", "▤", "KPIs")}
           {navItem("attribution", "⇢", "Attribution")}
           {navItem("tracking", "⌖", "Tracking & events")}
@@ -268,6 +271,7 @@ export function App() {
         {view === "performance" && (analytics ? <PerformancePage data={analytics} reviewStats={reviewStats} clientId={clientId} onChanged={refresh} /> : <div className="loading-panel">{loading ? "Loading performance data…" : "Choose a client or refresh to load performance."}</div>)}
         {view === "meta-ads" && <MetaAdsPage onOpenChannels={() => setView("channels")} />}
         {view === "lead-review" && <LeadReviewPage clientId={clientId || undefined} />}
+        {view === "intelligence" && <PerformanceIntelligencePage clientId={clientId || undefined} days={days} />}
         {view === "measurement" && <MeasurementPage clientId={clientId || undefined} days={days} />}
         {view === "tracking" && <TrackingPage clientId={clientId || undefined} days={days} />}
         {view === "attribution" && <AttributionPage clientId={clientId || undefined} days={days} />}

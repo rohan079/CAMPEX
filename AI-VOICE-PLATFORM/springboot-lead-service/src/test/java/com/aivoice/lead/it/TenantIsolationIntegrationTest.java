@@ -5,6 +5,7 @@ import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -12,6 +13,7 @@ import com.aivoice.lead.service.FirebaseTokenVerifier;
 import com.aivoice.lead.service.FirebaseTokenVerifier.VerifiedFirebaseUser;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -119,6 +121,32 @@ class TenantIsolationIntegrationTest {
         as("manager@a.test", post("/api/clients/" + clientA + "/sales"),
                 "{\"lead_id\":\"" + leadB + "\",\"booking_value\":100}").andExpect(status().isNotFound());
         as("stranger@x.test", get("/api/clients/" + clientA + "/crm/pipeline"), null).andExpect(status().isNotFound());
+    }
+
+    @Test
+    void phaseTwoIntelligenceIsTenantScoped() throws Exception {
+        for (String path : List.of("performance/overview", "performance/campaigns", "performance/ads", "performance/trends",
+                "recommendations", "budget/analysis", "budget/policy", "creative-performance", "audience-performance",
+                "placement-performance", "anomalies", "experiments")) {
+            as("manager@a.test", get("/api/clients/" + clientA + "/" + path), null).andExpect(status().isOk());
+            as("manager@a.test", get("/api/clients/" + clientB + "/" + path), null).andExpect(status().isNotFound());
+        }
+        String experimentB = id(as("admin@it.test", post("/api/clients/" + clientB + "/experiments"), "{\"name\":\"B test\","
+                + "\"hypothesis\":\"h\",\"variable\":\"headline\",\"primary_metric\":\"ctr\",\"min_sample_size\":100,"
+                + "\"control\":{\"name\":\"c\",\"ad_id\":\"111\"},\"test\":{\"name\":\"t\",\"ad_id\":\"222\"}}"));
+        as("manager@a.test", get("/api/experiments/" + experimentB), null).andExpect(status().isNotFound());
+        as("manager@a.test", post("/api/experiments/" + experimentB + "/start"), null).andExpect(status().isNotFound());
+        as("manager@a.test", post("/api/clients/" + clientB + "/recommendations/generate"), "{}").andExpect(status().isNotFound());
+        as("viewer@a.test", post("/api/clients/" + clientA + "/recommendations/generate"), "{}").andExpect(status().isForbidden());
+        as("viewer@a.test", put("/api/clients/" + clientA + "/budget/policy"), "{\"max_change_pct\":10}")
+                .andExpect(status().isForbidden());
+        as("manager@a.test", put("/api/clients/" + clientA + "/budget/policy"), "{\"max_change_pct\":10}")
+                .andExpect(status().isOk()).andExpect(jsonPath("$.max_change_pct").value(10));
+        // No Meta access: explicit notes, no invented numbers.
+        as("manager@a.test", get("/api/clients/" + clientA + "/performance/campaigns"), null)
+                .andExpect(jsonPath("$.meta_available").value(false))
+                .andExpect(jsonPath("$.data_notes[0].code").value("meta_unavailable"))
+                .andExpect(jsonPath("$.rows.length()").value(0));
     }
 
     @Test
