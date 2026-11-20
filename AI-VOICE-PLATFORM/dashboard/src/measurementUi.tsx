@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { SOURCE_LABELS } from "./measurementApi";
+import { SOURCE_LABELS } from "./measurementFormat";
 import type { MetricSource } from "./measurementTypes";
 
 /** Shows where a number comes from, so Meta-reported, tracked, CRM and typed-in figures are never confused. */

@@ -127,6 +127,13 @@ Full design, API list, Meta setup, pixel installation and limitations: **[docs/P
 - Phase 1 routes enforce client membership; set `CAMPEX_PLATFORM_ADMIN_EMAILS` before deploying.
 - Database-backed tests: `CAMPEX_IT_DATABASE_URL=jdbc:postgresql://…/disposable_db mvn test`.
 
+## Phase 2: performance intelligence
+
+Deterministic campaign analysis (Meta Insights joined with CRM outcomes), evidence-based recommendations, budget
+guardrails, creative and audience intelligence, anomaly detection and A/B experiment statistics, with AI explanations
+from OpenAI, Claude or an OpenAI-compatible model. Read-only towards Meta. Details:
+**[docs/PHASE2_PERFORMANCE_INTELLIGENCE.md](docs/PHASE2_PERFORMANCE_INTELLIGENCE.md)**.
+
 ## Clients, sales and reach (the marketing dashboard)
 
 The React dashboard is organized into **Campaign studio**, **Performance**, **Lead review**, **Channels**, and
