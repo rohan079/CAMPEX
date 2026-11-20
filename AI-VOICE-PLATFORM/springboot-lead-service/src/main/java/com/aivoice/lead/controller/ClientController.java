@@ -8,6 +8,7 @@ import com.aivoice.lead.dto.ClientDtos.ReachImportResult;
 import com.aivoice.lead.dto.ClientDtos.RegisterAdRequest;
 import com.aivoice.lead.dto.ClientDtos.UpdateClientMetaAppRequest;
 import com.aivoice.lead.dto.ClientDtos.UpdateClientVoiceSettingsRequest;
+import com.aivoice.lead.service.ClientAccessService;
 import com.aivoice.lead.service.ClientService;
 import jakarta.validation.Valid;
 import java.util.List;
@@ -26,9 +27,11 @@ import org.springframework.web.bind.annotation.RestController;
 public class ClientController {
 
     private final ClientService clients;
+    private final ClientAccessService access;
 
-    public ClientController(ClientService clients) {
+    public ClientController(ClientService clients, ClientAccessService access) {
         this.clients = clients;
+        this.access = access;
     }
 
     @GetMapping
@@ -38,7 +41,10 @@ public class ClientController {
 
     @PostMapping
     public ClientDto create(@Valid @RequestBody CreateClientRequest body) {
-        return clients.create(body);
+        ClientDto created = clients.create(body);
+        // Phase 1 tenant model: whoever creates a client owns it.
+        access.grantOwner(java.util.UUID.fromString(created.id()), access.currentActor());
+        return created;
     }
 
     @PatchMapping("/{id}/voice-settings")

@@ -27,6 +27,18 @@ public interface LeadRepository extends JpaRepository<Lead, UUID>, JpaSpecificat
 
     List<Lead> findByClientId(UUID clientId);
 
+    Optional<Lead> findByIdAndClientId(UUID id, UUID clientId);
+
+    /** Duplicate candidates within one client: same phone (any stored form) or same email. */
+    @Query("""
+            select l from Lead l
+            where l.clientId = :clientId and l.id <> :excludeId
+              and (l.phoneNumber in :phones or (:email is not null and lower(l.email) = :email))
+            order by l.createdAt asc
+            """)
+    List<Lead> findDuplicateCandidates(@Param("clientId") UUID clientId, @Param("excludeId") UUID excludeId,
+                                       @Param("phones") Collection<String> phones, @Param("email") String email);
+
     @Query("select l.status as name, count(l) as total from Lead l group by l.status")
     List<NameCount> countByStatus();
 

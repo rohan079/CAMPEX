@@ -79,7 +79,7 @@ public class AnalyticsRepository {
         return jdbc.query("""
                 select cast(sold_at at time zone :tz as date) as d, channel, count(*) as n, sum(amount) as amt
                 from sales
-                where sold_at >= :f and sold_at < :t""" + clientClause(clientId, "client_id") + """
+                where deleted_at is null and sold_at >= :f and sold_at < :t""" + clientClause(clientId, "client_id") + """
 
                 group by d, channel""", params(range, clientId),
                 (rs, i) -> new DaySales(rs.getDate("d").toLocalDate(), rs.getString("channel"),
@@ -114,7 +114,7 @@ public class AnalyticsRepository {
         return jdbc.query("""
                 select coalesce(ad_id, '') as ad, channel, count(*) as n, sum(amount) as amt
                 from sales
-                where sold_at >= :f and sold_at < :t""" + clientClause(clientId, "client_id") + """
+                where deleted_at is null and sold_at >= :f and sold_at < :t""" + clientClause(clientId, "client_id") + """
 
                 group by ad, channel""", params(range, clientId),
                 (rs, i) -> new AdSalesRow(rs.getString("ad"), rs.getString("channel"),
@@ -161,7 +161,7 @@ public class AnalyticsRepository {
     public List<ClientChannelTotals> salesPerClient(Range range) {
         return jdbc.query("""
                 select client_id, channel, count(*) as n, sum(amount) as amt from sales
-                where sold_at >= :f and sold_at < :t group by client_id, channel""", params(range, null),
+                where deleted_at is null and sold_at >= :f and sold_at < :t group by client_id, channel""", params(range, null),
                 (rs, i) -> new ClientChannelTotals(rs.getObject("client_id", UUID.class), rs.getString("channel"),
                         rs.getLong("n"), rs.getBigDecimal("amt")));
     }

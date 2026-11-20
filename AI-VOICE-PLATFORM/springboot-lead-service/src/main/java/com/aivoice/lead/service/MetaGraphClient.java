@@ -161,6 +161,48 @@ public class MetaGraphClient {
                 .toList();
     }
 
+    /** One row of Meta-reported delivery for a campaign, ad set or ad. */
+    public record InsightRow(String campaignId, String campaignName, String adsetId, String adsetName, String adId,
+                             String adName, java.math.BigDecimal spend, long impressions, long clicks,
+                             String accountCurrency) {
+    }
+
+    /**
+     * Meta Insights for an ad account over [since, until] (inclusive days) at {@code level} campaign|adset|ad.
+     * Spend and impressions here are Meta-reported figures.
+     */
+    public List<InsightRow> insights(String adAccountId, java.time.LocalDate since, java.time.LocalDate until,
+                                     String level, String accessToken) {
+        String account = adAccountId.startsWith("act_") ? adAccountId : "act_" + adAccountId;
+        if (!List.of("campaign", "adset", "ad").contains(level)) {
+            throw new IllegalArgumentException("level must be campaign, adset or ad");
+        }
+        List<InsightRow> rows = new ArrayList<>();
+        String after = null;
+        for (int pageNumber = 0; pageNumber < MAX_PAGES; pageNumber++) {
+            Map<String, String> query = new LinkedHashMap<>();
+            query.put("level", level);
+            query.put("fields", "campaign_id,campaign_name,adset_id,adset_name,ad_id,ad_name,spend,impressions,clicks,account_currency");
+            query.put("time_range", "{\"since\":\"" + since + "\",\"until\":\"" + until + "\"}");
+            query.put("limit", "500");
+            query.put("access_token", accessToken);
+            if (after != null) query.put("after", after);
+            JsonNode body = request(account + "/insights", query);
+            for (JsonNode row : body.path("data")) {
+                rows.add(new InsightRow(row.path("campaign_id").asText(null), row.path("campaign_name").asText(null),
+                        row.path("adset_id").asText(null), row.path("adset_name").asText(null),
+                        row.path("ad_id").asText(null), row.path("ad_name").asText(null),
+                        new java.math.BigDecimal(row.path("spend").asText("0")), row.path("impressions").asLong(0),
+                        row.path("clicks").asLong(0), row.path("account_currency").asText(null)));
+            }
+            JsonNode paging = body.path("paging");
+            String next = paging.path("cursors").path("after").asText(null);
+            if (!paging.hasNonNull("next") || next == null || next.isBlank() || next.equals(after)) return rows;
+            after = next;
+        }
+        throw new MetaGraphException(502, -1, "insights_pagination_limit");
+    }
+
     public void revokeUserToken(String accessToken) {
         JsonNode response = request(HttpMethod.DELETE, "me/permissions", Map.of("access_token", accessToken));
         if (!response.path("success").asBoolean(false)) throw new MetaGraphException(502, -1);

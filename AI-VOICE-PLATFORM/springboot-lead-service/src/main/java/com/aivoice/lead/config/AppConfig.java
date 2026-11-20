@@ -32,9 +32,23 @@ public class AppConfig implements WebMvcConfigurer {
                 .map(String::trim)
                 .filter(origin -> !origin.isEmpty())
                 .toArray(String[]::new);
+        // The website SDK runs on client domains. Origins are checked against each pixel's allowed domains in
+        // TrackingIngestionService; no cookies or credentials are accepted on these routes.
+        registry.addMapping("/api/tracking/events")
+                .allowedOriginPatterns("*")
+                .allowedMethods("POST", "OPTIONS")
+                .allowedHeaders("Content-Type")
+                .allowCredentials(false)
+                .maxAge(3600);
+        registry.addMapping("/api/tracking/consent")
+                .allowedOriginPatterns("*")
+                .allowedMethods("POST", "OPTIONS")
+                .allowedHeaders("Content-Type")
+                .allowCredentials(false)
+                .maxAge(3600);
         registry.addMapping("/api/**")
                 .allowedOrigins(origins)
-                .allowedMethods("GET", "POST", "PATCH", "DELETE", "OPTIONS")
+                .allowedMethods("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS")
                 .allowedHeaders("Content-Type", "X-Ad-Popup-Token");
         registry.addMapping("/health")
                 .allowedOrigins(origins)

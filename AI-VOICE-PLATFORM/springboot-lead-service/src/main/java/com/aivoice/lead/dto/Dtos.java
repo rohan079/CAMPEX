@@ -57,7 +57,9 @@ public final class Dtos {
             Instant updatedAt,
             LatestCallDto latestCall,
             @JsonInclude(JsonInclude.Include.NON_NULL) List<CallDto> calls,
-            @JsonInclude(JsonInclude.Include.NON_NULL) Boolean languageLocked) {
+            @JsonInclude(JsonInclude.Include.NON_NULL) Boolean languageLocked,
+            String pipelineStatus,
+            String assignedAgentId) {
     }
 
     public record LeadPage(List<LeadDto> leads, long total, int limit, long offset) {
@@ -101,7 +103,11 @@ public final class Dtos {
             @Size(max = 300) String adHeadline,
             @Size(max = 2000) String adBody,
             @Size(max = 8) String language,
-            @Size(max = 80) String client) {
+            @Size(max = 80) String client,
+            /** Optional, Phase 1: lets the CRM match and hash the lead for Conversions API events. */
+            @jakarta.validation.constraints.Email @Size(max = 320) String email,
+            /** Optional, Phase 1: campaign/click/UTM evidence, e.g. the result of Campex.getAttribution(). */
+            @jakarta.validation.Valid AttributionDtos.AttributionInput attribution) {
     }
 
     public record AdLeadResponse(String id, String status, String phoneNumber,

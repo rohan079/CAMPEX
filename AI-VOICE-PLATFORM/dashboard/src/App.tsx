@@ -5,6 +5,11 @@ import { getAnalytics, getClients, getHealth, getLeadReviewStats } from "./api";
 import { auth } from "./firebase";
 import { consumeStoredAuthError, signOutFirebase } from "./firebaseAuth";
 import { AiCampaignAssistant } from "./AiCampaignAssistant";
+import { AttributionPage, MeasurementPage } from "./AttributionPage";
+import { CrmPipelinePage } from "./CrmPipelinePage";
+import { SalesAttributionPage } from "./SalesAttributionPage";
+import { SiteVisitsPage } from "./SiteVisitsPage";
+import { TrackingPage } from "./TrackingPage";
 import { CampaignStudio } from "./CampaignStudio";
 import { ChannelsPage } from "./ChannelsPage";
 import { ClientsPage } from "./ClientsPage";
@@ -14,7 +19,10 @@ import { PerformancePage } from "./PerformancePage";
 import { num } from "./format";
 import type { Client, ClientAnalytics, Health, LeadReviewStats } from "./types";
 
-type View = "campaigns" | "assistant" | "performance" | "meta-ads" | "lead-review" | "channels" | "clients";
+type View = "campaigns" | "assistant" | "performance" | "meta-ads" | "lead-review" | "channels" | "clients"
+  | "measurement" | "tracking" | "attribution" | "crm" | "site-visits" | "sales";
+/** Views whose data depends on the selected period. */
+const RANGED_VIEWS: View[] = ["performance", "measurement", "tracking", "attribution", "crm"];
 const RANGE_OPTIONS = [7, 30, 90];
 const CLIENT_KEY = "campaign-workspace.client";
 const DAYS_KEY = "campaign-workspace.days";
@@ -27,6 +35,12 @@ const PAGE_META: Record<View, { title: string; eyebrow: string; description: str
   "lead-review": { title: "Lead review", eyebrow: "Keep the pipeline clean", description: "Accept qualified leads or reject them from future follow-up." },
   channels: { title: "Channels", eyebrow: "Workspace setup", description: "Manage platform publishing connections." },
   clients: { title: "Clients", eyebrow: "Workspace setup", description: "Manage the businesses in this workspace." },
+  measurement: { title: "Measurement", eyebrow: "Spend to revenue", description: "KPIs with the source of every number." },
+  tracking: { title: "Tracking & events", eyebrow: "Pixel and Conversions API", description: "Pixels, website events and Meta delivery." },
+  attribution: { title: "Attribution", eyebrow: "Campaign to lead to sale", description: "First-touch and last-touch campaign performance." },
+  crm: { title: "CRM pipeline", eyebrow: "Sales operations", description: "Assign, qualify and move leads to a sale." },
+  "site-visits": { title: "Site visits", eyebrow: "Sales operations", description: "Schedule and track property visits." },
+  sales: { title: "Sales", eyebrow: "Lead to sale", description: "Bookings, payments and confirmed revenue." },
 };
 
 function initialDays(): number {
@@ -200,6 +214,14 @@ export function App() {
           {navItem("performance", "◴", "Performance")}
           {navItem("meta-ads", "◈", "Meta Ads")}
           {navItem("lead-review", "✓", "Lead review", reviewStats.pending || undefined)}
+          <p className="side-group-label">MEASUREMENT</p>
+          {navItem("measurement", "▤", "KPIs")}
+          {navItem("attribution", "⇢", "Attribution")}
+          {navItem("tracking", "⌖", "Tracking & events")}
+          <p className="side-group-label">SALES</p>
+          {navItem("crm", "▥", "CRM pipeline")}
+          {navItem("site-visits", "⌂", "Site visits")}
+          {navItem("sales", "₹", "Sales")}
           <p className="side-group-label">CONFIGURATION</p>
           {navItem("channels", "⌁", "Channels")}
           {navItem("clients", "▦", "Clients", clients.length || undefined)}
@@ -219,7 +241,7 @@ export function App() {
             <label className="client-select"><span>Client</span><select value={clientId} onChange={(event) => selectClient(event.target.value)}>
               <option value="">All clients</option>{clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}
             </select></label>
-            {view === "performance" && <div className="range-select" aria-label="Performance range">
+            {RANGED_VIEWS.includes(view) && <div className="range-select" aria-label="Performance range">
               {RANGE_OPTIONS.map((value) => <button key={value} type="button" aria-pressed={days === value} onClick={() => selectDays(value)}>{value}d</button>)}
             </div>}
             <button type="button" className="icon-button" onClick={refresh} aria-label="Refresh data" title="Refresh data">↻</button>
@@ -231,7 +253,7 @@ export function App() {
         {error && <div className="global-error" role="alert"><span>{error}</span><button type="button" onClick={() => setError(null)}>Dismiss</button></div>}
         {view !== "assistant" && (
           <section className="view-heading"><div><p className="eyebrow">{meta.eyebrow}</p><h1>{meta.title}</h1><p>{meta.description}</p></div>
-            {view === "performance" && <span className="range-caption">{scopeName} · last {days} days</span>}
+            {RANGED_VIEWS.includes(view) && <span className="range-caption">{scopeName} · last {days} days</span>}
           </section>
         )}
 
@@ -246,6 +268,12 @@ export function App() {
         {view === "performance" && (analytics ? <PerformancePage data={analytics} reviewStats={reviewStats} clientId={clientId} onChanged={refresh} /> : <div className="loading-panel">{loading ? "Loading performance data…" : "Choose a client or refresh to load performance."}</div>)}
         {view === "meta-ads" && <MetaAdsPage onOpenChannels={() => setView("channels")} />}
         {view === "lead-review" && <LeadReviewPage clientId={clientId || undefined} />}
+        {view === "measurement" && <MeasurementPage clientId={clientId || undefined} days={days} />}
+        {view === "tracking" && <TrackingPage clientId={clientId || undefined} days={days} />}
+        {view === "attribution" && <AttributionPage clientId={clientId || undefined} days={days} />}
+        {view === "crm" && <CrmPipelinePage clientId={clientId || undefined} days={days} />}
+        {view === "site-visits" && <SiteVisitsPage clientId={clientId || undefined} />}
+        {view === "sales" && <SalesAttributionPage clientId={clientId || undefined} currency={analytics?.currency ?? "INR"} />}
         {view === "channels" && (
           <ChannelsPage
             clientId={clientId || undefined}

@@ -36,6 +36,10 @@ public class ApiKeyFilter extends OncePerRequestFilter {
             if (!allowed(request, "X-Service-Key", props.internalServiceKey(), response, "Service key")) {
                 return;
             }
+        } else if (isPublicTrackingPath(path)) {
+            // Public website SDK endpoints: validated per pixel/domain, rate limited and consent-checked in the service.
+            chain.doFilter(request, response);
+            return;
         } else if (path.equals("/api/ad-leads")) {
             if (!allowed(request, "X-Ad-Popup-Token", props.adPopupToken(), response, "Ad popup token")) {
                 return;
@@ -48,7 +52,8 @@ public class ApiKeyFilter extends OncePerRequestFilter {
                 }
             } else {
                 try {
-                    dashboardAuth.requireAuthenticated(request);
+                    request.setAttribute(DashboardAuthService.IDENTITY_ATTRIBUTE,
+                            dashboardAuth.requireAuthenticated(request));
                 } catch (AuthException e) {
                     reject(response, e.status().value(), e.getMessage());
                     return;
@@ -56,6 +61,11 @@ public class ApiKeyFilter extends OncePerRequestFilter {
             }
         }
         chain.doFilter(request, response);
+    }
+
+    /** Only the browser-facing ingestion routes are public; every other tracking route needs dashboard auth. */
+    static boolean isPublicTrackingPath(String path) {
+        return path.equals("/api/tracking/events") || path.equals("/api/tracking/consent");
     }
 
     private boolean allowed(HttpServletRequest request, String header, String expected,
