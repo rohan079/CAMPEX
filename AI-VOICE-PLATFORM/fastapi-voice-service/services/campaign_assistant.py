@@ -36,10 +36,12 @@ READ_ONLY_META_TOOLS = frozenset({
     "get_adset_insights",
     "get_ad_insights",
     "get_account_insights",
+    "get_meta_performance_report",
 })
 MAX_TOOL_ROUNDS = 4
 MAX_TOOL_OUTPUT_CHARS = 12_000
 AUDIT_SKILL_PATH = Path(__file__).resolve().parents[1] / "prompts" / "meta_ads_audit.txt"
+TOOL_RULES_PATH = Path(__file__).resolve().parents[1] / "prompts" / "meta_ads_tool_rules.txt"
 
 
 def _schema_for_model(tool: Any) -> dict[str, Any] | None:
@@ -136,6 +138,13 @@ class CampaignAssistantService:
             self._audit_skill = AUDIT_SKILL_PATH.read_text(encoding="utf-8")
         except OSError:
             self._audit_skill = "Use only returned Meta metrics and state when a requested audit signal is unavailable."
+        try:
+            self._tool_rules = TOOL_RULES_PATH.read_text(encoding="utf-8")
+        except OSError:
+            self._tool_rules = (
+                "Prefer get_meta_performance_report for account performance. "
+                "Never invent advertising metrics. Distinguish zero metrics from unavailable metrics."
+            )
 
     async def assist(
         self,
@@ -155,13 +164,14 @@ class CampaignAssistantService:
 
         use_design = request.mode == "design" or bool(request.images)
         system = (
-            "You are a careful real-estate campaign assistant and Meta Ads analyst. Use only facts and "
+            "You are CAMPEX AI Campaign Assistant and a careful Meta Ads analyst. Use only facts and "
             "metrics actually supplied or returned by tools. Never invent prices, returns, approvals, amenities, "
             "availability, conversions, ROAS, or legal claims. Explicitly flag missing information. "
             "Use Meta tools only for live account or campaign questions. This chat exposes read-only tools; "
             "never create, pause, activate, update, or delete advertising objects. Campaign publishing is a "
             "separate user-confirmed action. For copy requests, return Summary and Suggested copy sections. "
-            f"Write copy in {'natural Telugu' if request.language == 'te' else 'English'}. "
+            f"Write copy in {'natural Telugu' if request.language == 'te' else 'English'}.\n\n"
+            f"{self._tool_rules}\n\n"
             "Default audit guidance:\n"
             f"{self._audit_skill}"
         )
@@ -184,7 +194,9 @@ class CampaignAssistantService:
             f"Selected channels: {', '.join(request.platforms)}\n"
             f"Selected ad account: {request.ad_account_id or 'not selected'}\n"
             f"Active skill: {(selected_skill.name if selected_skill else 'none')}\n"
-            f"User request: {request.prompt}\n\nCurrent ad content:\n{request.content or 'No draft copy supplied.'}"
+            f"User request: {request.prompt}\n\nCurrent ad content:\n{request.content or 'No draft copy supplied.'}\n"
+            "If the user asks for Meta performance and an ad account is selected, call "
+            "get_meta_performance_report with that ad_account_id first (date_preset last_14d unless specified)."
         )
         if request.images:
             names = ", ".join(image.name for image in request.images)
@@ -319,7 +331,8 @@ class CampaignAssistantService:
                                     try:
                                         result = await mcp_client.call_tool(name, arguments)
                                     except ToolError as exc:
-                                        tool_text = str(exc)
+                                        detail = str(exc).strip() or type(exc).__name__
+                                        tool_text = f"Tool error from {name}: {detail}"
                                     else:
                                         tool_text = _tool_result_text(result)
                                         tools_used.append(name)

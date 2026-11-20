@@ -35,7 +35,10 @@ async def test_openai_assistant_uses_server_key_and_returns_copy():
     assert result.reply == "Verified residential plots near Vijayawada."
     assert result.provider == "openai"
     assert seen["authorization"] == "Bearer server-only"
-    assert "never invent prices" in seen["body"].lower()
+    body = seen["body"].lower()
+    assert "never invent prices" in body
+    assert "get_meta_performance_report" in body
+    assert "campex ai campaign assistant" in body
 
 
 @pytest.mark.asyncio

@@ -30,7 +30,13 @@ async def test_mcp_discovers_meta_tools_and_keeps_token_out_of_graph_urls():
     async with Client(server) as client:
         tools = await client.list_tools()
         names = {tool.name for tool in tools}
-        assert {"get_ad_accounts", "get_campaigns", "get_account_insights", "create_paused_campaign"} <= names
+        assert {
+            "get_ad_accounts",
+            "get_campaigns",
+            "get_account_insights",
+            "get_meta_performance_report",
+            "create_paused_campaign",
+        } <= names
         result = await client.call_tool("get_ad_accounts", {"access_token": "sensitive-token"})
 
     assert result.is_error is False
@@ -106,3 +112,50 @@ async def test_mcp_does_not_create_campaign_for_an_unowned_account():
             })
 
     assert calls == ["/v27.0/me/adaccounts"]
+
+
+@pytest.mark.asyncio
+async def test_meta_performance_report_prefers_account_insights_and_marks_empty():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path.endswith("/act_123/insights")
+        assert "last_14d" in str(request.url)
+        return httpx.Response(200, json={"data": []})
+
+    server = create_meta_ads_mcp(Settings(meta_graph_api_version="v27.0"), httpx.MockTransport(handler))
+    async with Client(server) as client:
+        result = await client.call_tool("get_meta_performance_report", {
+            "ad_account_id": "act_123",
+            "access_token": "sensitive-token",
+        })
+
+    data = tool_payload(result)
+    assert data["status"] == "empty"
+    assert data["metrics"] == []
+    assert "No metrics were returned" in data["message"]
+
+
+@pytest.mark.asyncio
+async def test_meta_performance_report_totals_and_zero_status():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"data": [{
+            "spend": "0",
+            "impressions": "0",
+            "reach": "0",
+            "clicks": "0",
+            "ctr": "0",
+            "cpc": "0",
+            "cpm": "0",
+        }]})
+
+    server = create_meta_ads_mcp(Settings(meta_graph_api_version="v27.0"), httpx.MockTransport(handler))
+    async with Client(server) as client:
+        result = await client.call_tool("get_meta_performance_report", {
+            "ad_account_id": "123",
+            "access_token": "sensitive-token",
+            "date_preset": "last_7d",
+        })
+
+    data = tool_payload(result)
+    assert data["status"] == "zero_metrics"
+    assert data["totals"]["spend"] == 0.0
+    assert data["scope"]["ad_account_id"] == "act_123"

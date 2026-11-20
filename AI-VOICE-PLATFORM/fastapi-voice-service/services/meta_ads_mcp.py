@@ -406,6 +406,91 @@ def create_meta_ads_mcp(
         )
 
     @mcp.tool
+    async def get_meta_performance_report(
+        ad_account_id: str,
+        access_token: str,
+        date_preset: str = "last_14d",
+        date_from: str = "",
+        date_to: str = "",
+        campaign_id: str = "",
+        level: Literal["account", "campaign"] = "account",
+        breakdown: Literal["publisher_platform", "platform_position", "country", ""] = "",
+    ) -> dict[str, Any]:
+        """Preferred tool for reach, impressions, spend, clicks, CTR, CPC, and CPM.
+
+        Defaults to last_14d. Use account-level insights when that answers the question.
+        Pass campaign_id (and level=campaign) only for campaign-specific analysis.
+        Distinguishes empty Meta responses from rows that contain zero metrics.
+        """
+        account = graph.account_id(ad_account_id)
+        params = graph.insights_params(date_preset, date_from or None, date_to or None, breakdown)
+        period = {
+            "date_preset": date_preset if not (date_from or date_to) else None,
+            "date_from": date_from or None,
+            "date_to": date_to or None,
+        }
+        target_campaign = campaign_id.strip()
+        if level == "campaign" or target_campaign:
+            if not target_campaign:
+                raise MetaAdsToolError("campaign_id is required for campaign-level performance reports.")
+            edge = f"{graph.object_id(target_campaign)}/insights"
+            scope = {"level": "campaign", "campaign_id": target_campaign, "ad_account_id": account}
+        else:
+            edge = f"{account}/insights"
+            scope = {"level": "account", "ad_account_id": account}
+
+        rows = await graph.list_edge(edge, access_token, INSIGHT_FIELDS, 100, params)
+        if not rows:
+            return {
+                "status": "empty",
+                "message": "No metrics were returned for the selected account/period.",
+                "scope": scope,
+                "period": period,
+                "metrics": [],
+                "totals": None,
+            }
+
+        def _num(row: dict[str, Any], key: str) -> float:
+            raw = row.get(key)
+            try:
+                return float(raw) if raw is not None and raw != "" else 0.0
+            except (TypeError, ValueError):
+                return 0.0
+
+        totals = {
+            "spend": 0.0,
+            "impressions": 0.0,
+            "reach": 0.0,
+            "clicks": 0.0,
+        }
+        for row in rows:
+            totals["spend"] += _num(row, "spend")
+            totals["impressions"] += _num(row, "impressions")
+            totals["reach"] += _num(row, "reach")
+            totals["clicks"] += _num(row, "clicks")
+        impressions = totals["impressions"]
+        clicks = totals["clicks"]
+        spend = totals["spend"]
+        totals["ctr"] = (clicks / impressions * 100.0) if impressions else 0.0
+        totals["cpc"] = (spend / clicks) if clicks else 0.0
+        totals["cpm"] = (spend / impressions * 1000.0) if impressions else 0.0
+        all_zero = all(value == 0.0 for value in (
+            totals["spend"], totals["impressions"], totals["reach"], totals["clicks"],
+        ))
+        return {
+            "status": "zero_metrics" if all_zero else "ok",
+            "message": (
+                "Meta returned rows, but all key metrics are zero for this period."
+                if all_zero
+                else "Meta performance metrics returned successfully."
+            ),
+            "scope": scope,
+            "period": period,
+            "metrics": rows,
+            "totals": totals,
+        }
+
+    @mcp.tool
     async def create_paused_campaign(
         ad_account_id: str,
         name: str,
