@@ -71,6 +71,32 @@ async def test_assist_generates_image_from_image_prompt_section():
 
 
 @pytest.mark.asyncio
+async def test_gpt_image_model_omits_response_format():
+    png = base64.b64encode(b"gpt-image-bytes").decode("ascii")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/chat/completions"):
+            return httpx.Response(200, json={
+                "choices": [{"message": {"content": "Summary: ok\nImage prompt: villa at dusk"}}],
+            })
+        payload = json.loads(request.content.decode())
+        assert payload["model"] == "gpt-image-1"
+        assert "response_format" not in payload
+        return httpx.Response(200, json={"data": [{"b64_json": png}]})
+
+    settings = Settings(
+        ai_provider="openai",
+        ai_api_key="server-only",
+        ai_base_url="https://api.openai.com/v1",
+        ai_image_enabled=True,
+        ai_image_model="gpt-image-1",
+    )
+    result = await CampaignAssistantService(settings, httpx.MockTransport(handler)).assist(design_request())
+    assert result.generated_images[0].data_base64 == png
+    assert result.image_error is None
+
+
+@pytest.mark.asyncio
 async def test_assist_surfaces_image_api_error_without_failing_copy():
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path.endswith("/chat/completions"):

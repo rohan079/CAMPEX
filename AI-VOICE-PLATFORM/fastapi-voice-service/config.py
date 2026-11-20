@@ -59,6 +59,7 @@ class Settings(BaseSettings):
     ai_model: str = "gpt-4o-mini"
     ai_timeout_seconds: float = 45
     # Ad creative image generation (OpenAI Images API). Disabled for openai_compatible unless configured.
+    # Use dall-e-3 or a GPT Image model (gpt-image-1 / gpt-image-1.5). GPT Image rejects response_format.
     ai_image_model: str = "dall-e-3"
     ai_image_size: str = "1024x1024"
     ai_image_timeout_seconds: float = 90

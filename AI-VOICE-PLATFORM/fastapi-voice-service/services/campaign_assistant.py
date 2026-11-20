@@ -496,15 +496,19 @@ class CampaignAssistantService:
             })
 
         prompt = self._image_prompt_from_reply(result.reply, request)
-        payload = {
-            "model": settings.ai_image_model,
+        model = (settings.ai_image_model or "dall-e-3").strip()
+        payload: dict[str, Any] = {
+            "model": model,
             "prompt": prompt,
             "size": settings.ai_image_size,
             "n": 1,
-            "response_format": "b64_json",
         }
-        if settings.ai_image_model.startswith("dall-e-3"):
-            payload["quality"] = "standard"
+        # GPT Image models reject response_format and always return b64_json.
+        # DALL·E still needs response_format=b64_json to avoid temporary URLs.
+        if model.startswith("dall-e"):
+            payload["response_format"] = "b64_json"
+            if model.startswith("dall-e-3"):
+                payload["quality"] = "standard"
 
         try:
             response = await client.post(
