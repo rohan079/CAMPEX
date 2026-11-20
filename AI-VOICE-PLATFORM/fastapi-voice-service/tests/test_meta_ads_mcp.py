@@ -35,6 +35,7 @@ async def test_mcp_discovers_meta_tools_and_keeps_token_out_of_graph_urls():
             "get_campaigns",
             "get_account_insights",
             "get_meta_performance_report",
+            "get_ad_performance",
             "create_paused_campaign",
         } <= names
         result = await client.call_tool("get_ad_accounts", {"access_token": "sensitive-token"})
@@ -159,3 +160,64 @@ async def test_meta_performance_report_totals_and_zero_status():
     assert data["status"] == "zero_metrics"
     assert data["totals"]["spend"] == 0.0
     assert data["scope"]["ad_account_id"] == "act_123"
+
+
+@pytest.mark.asyncio
+async def test_ad_performance_resolves_exact_name_and_uses_last_7d():
+    seen = {"paths": []}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["paths"].append(request.url.path)
+        if request.url.path.endswith("/act_55/ads"):
+            query = str(request.url)
+            assert "EQUAL" in query
+            assert "Spring+Launch" in query or "Spring%20Launch" in query or "Spring Launch" in query
+            return httpx.Response(200, json={"data": [{
+                "id": "111",
+                "name": "Spring Launch",
+                "campaign_id": "222",
+                "adset_id": "333",
+                "effective_status": "ACTIVE",
+            }]})
+        if request.url.path.endswith("/111/insights"):
+            assert "last_7d" in str(request.url)
+            return httpx.Response(200, json={"data": [{
+                "spend": "25.5",
+                "impressions": "1000",
+                "reach": "800",
+                "clicks": "40",
+            }]})
+        raise AssertionError(f"Unexpected path {request.url.path}")
+
+    server = create_meta_ads_mcp(Settings(meta_graph_api_version="v27.0"), httpx.MockTransport(handler))
+    async with Client(server) as client:
+        result = await client.call_tool("get_ad_performance", {
+            "ad_account_id": "act_55",
+            "ad_name": "Spring Launch",
+            "access_token": "sensitive-token",
+        })
+
+    data = tool_payload(result)
+    assert data["status"] == "ok"
+    assert data["scope"]["ad_id"] == "111"
+    assert data["period"]["date_preset"] == "last_7d"
+    assert data["totals"]["clicks"] == 40.0
+    assert seen["paths"] == ["/v27.0/act_55/ads", "/v27.0/111/insights"]
+
+
+@pytest.mark.asyncio
+async def test_ad_performance_reports_exact_name_misses():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"data": []})
+
+    server = create_meta_ads_mcp(Settings(meta_graph_api_version="v27.0"), httpx.MockTransport(handler))
+    async with Client(server) as client:
+        result = await client.call_tool("get_ad_performance", {
+            "ad_account_id": "act_55",
+            "ad_name": "Missing Ad",
+            "access_token": "sensitive-token",
+        })
+
+    data = tool_payload(result)
+    assert data["status"] == "not_found"
+    assert "exact name" in data["message"]

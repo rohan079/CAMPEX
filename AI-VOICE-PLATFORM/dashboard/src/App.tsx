@@ -236,7 +236,13 @@ export function App() {
         )}
 
         {view === "campaigns" && <CampaignStudio client={currentClient} onOpenChannels={() => setView("channels")} />}
-        {view === "assistant" && <AiCampaignAssistant clientName={currentClient?.name} onOpenChannels={() => setView("channels")} />}
+        {view === "assistant" && (
+          <AiCampaignAssistant
+            clientId={clientId || undefined}
+            clientName={currentClient?.name}
+            onOpenChannels={() => setView("channels")}
+          />
+        )}
         {view === "performance" && (analytics ? <PerformancePage data={analytics} reviewStats={reviewStats} clientId={clientId} onChanged={refresh} /> : <div className="loading-panel">{loading ? "Loading performance data…" : "Choose a client or refresh to load performance."}</div>)}
         {view === "meta-ads" && <MetaAdsPage onOpenChannels={() => setView("channels")} />}
         {view === "lead-review" && <LeadReviewPage clientId={clientId || undefined} />}

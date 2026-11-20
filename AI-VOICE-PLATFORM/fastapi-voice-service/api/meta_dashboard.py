@@ -30,6 +30,7 @@ READ_TOOLS = (
     "get_ad_insights",
     "get_account_insights",
     "get_meta_performance_report",
+    "get_ad_performance",
 )
 
 

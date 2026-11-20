@@ -60,6 +60,8 @@ class CampaignAssistRequest(BaseModel):
     prompt: str = Field(min_length=1, max_length=2000)
     content: str = Field(default="", max_length=5000)  # empty allowed for image-led design prompts
     ad_account_id: str | None = Field(default=None, max_length=64)
+    client_id: str | None = Field(default=None, max_length=64)
+    client_name: str | None = Field(default=None, max_length=160)
     skill_id: str | None = Field(default=None, max_length=120)
     images: list[AssistImage] = Field(default_factory=list, max_length=3)
     mode: Literal["assist", "design"] = "assist"

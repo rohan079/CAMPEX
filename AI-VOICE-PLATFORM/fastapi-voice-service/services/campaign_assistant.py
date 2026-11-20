@@ -37,6 +37,7 @@ READ_ONLY_META_TOOLS = frozenset({
     "get_ad_insights",
     "get_account_insights",
     "get_meta_performance_report",
+    "get_ad_performance",
 })
 MAX_TOOL_ROUNDS = 4
 MAX_TOOL_OUTPUT_CHARS = 12_000
@@ -163,6 +164,16 @@ class CampaignAssistantService:
                 raise CampaignAssistantUnavailable("Selected skill was not found")
 
         use_design = request.mode == "design" or bool(request.images)
+        active_client = (request.client_name or "").strip()
+        client_binding = (
+            f"Active workspace client: {active_client} (id={request.client_id}). "
+            "Use only this client. Never rename it or substitute another business such as P&J TECH."
+            if active_client
+            else (
+                "No active workspace client is selected. Do not invent or substitute a client name "
+                "(including P&J TECH or any platform default). Ask the user to select a client."
+            )
+        )
         system = (
             "You are CAMPEX AI Campaign Assistant and a careful Meta Ads analyst. Use only facts and "
             "metrics actually supplied or returned by tools. Never invent prices, returns, approvals, amenities, "
@@ -170,7 +181,8 @@ class CampaignAssistantService:
             "Use Meta tools only for live account or campaign questions. This chat exposes read-only tools; "
             "never create, pause, activate, update, or delete advertising objects. Campaign publishing is a "
             "separate user-confirmed action. For copy requests, return Summary and Suggested copy sections. "
-            f"Write copy in {'natural Telugu' if request.language == 'te' else 'English'}.\n\n"
+            f"Write copy in {'natural Telugu' if request.language == 'te' else 'English'}.\n"
+            f"{client_binding}\n\n"
             f"{self._tool_rules}\n\n"
             "Default audit guidance:\n"
             f"{self._audit_skill}"
@@ -190,13 +202,16 @@ class CampaignAssistantService:
 
         text_user = (
             f"Mode: {'ad design' if use_design else 'campaign assist'}\n"
+            f"Active workspace client: {request.client_name or 'not selected'}\n"
+            f"Active workspace client id: {request.client_id or 'not selected'}\n"
             f"Campaign: {request.campaign_name}\nObjective: {request.objective}\n"
             f"Selected channels: {', '.join(request.platforms)}\n"
             f"Selected ad account: {request.ad_account_id or 'not selected'}\n"
             f"Active skill: {(selected_skill.name if selected_skill else 'none')}\n"
             f"User request: {request.prompt}\n\nCurrent ad content:\n{request.content or 'No draft copy supplied.'}\n"
-            "If the user asks for Meta performance and an ad account is selected, call "
-            "get_meta_performance_report with that ad_account_id first (date_preset last_14d unless specified)."
+            "Tool routing: if the user names a specific ad, call get_ad_performance with exact ad_name "
+            "and date_preset last_7d unless another range is requested. For account-level metrics, call "
+            "get_meta_performance_report. Do not call get_campaigns/get_ad_sets/get_ads unless required."
         )
         if request.images:
             names = ", ".join(image.name for image in request.images)

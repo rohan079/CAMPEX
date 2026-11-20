@@ -391,6 +391,153 @@ def create_meta_ads_mcp(
         )
 
     @mcp.tool
+    async def get_ad_performance(
+        ad_account_id: str,
+        access_token: str,
+        ad_name: str = "",
+        ad_id: str = "",
+        date_preset: str = "last_7d",
+        date_from: str = "",
+        date_to: str = "",
+    ) -> dict[str, Any]:
+        """Preferred tool for one ad's reach, impressions, spend, clicks, CTR, CPC, and CPM.
+
+        Resolve the ad by exact name (EQUAL match) unless ad_id is supplied, then query insights
+        for that individual ad ID. Defaults to last_7d. Do not invent metrics when Meta returns
+        empty rows or an API error.
+        """
+        account = graph.account_id(ad_account_id)
+        resolved_id = ad_id.strip()
+        resolved_name = ad_name.strip()
+        matched: dict[str, Any] | None = None
+
+        if resolved_id:
+            matched = await graph.request(
+                "GET",
+                graph.object_id(resolved_id),
+                access_token,
+                params={"fields": "id,name,campaign_id,adset_id,status,effective_status"},
+            )
+            resolved_name = str(matched.get("name") or resolved_name)
+        else:
+            if not resolved_name:
+                raise MetaAdsToolError("Provide an exact ad_name or an ad_id for ad performance.")
+            filtering = json.dumps([{
+                "field": "name",
+                "operator": "EQUAL",
+                "value": resolved_name,
+            }])
+            ads = await graph.list_edge(
+                f"{account}/ads",
+                access_token,
+                "id,name,campaign_id,adset_id,status,effective_status",
+                25,
+                {"filtering": filtering},
+            )
+            exact = [row for row in ads if str(row.get("name") or "") == resolved_name]
+            if not exact:
+                return {
+                    "status": "not_found",
+                    "message": f'No ad with the exact name "{resolved_name}" was found in {account}.',
+                    "ad_account_id": account,
+                    "ad_name": resolved_name,
+                    "ad_id": None,
+                    "period": {
+                        "date_preset": date_preset if not (date_from or date_to) else None,
+                        "date_from": date_from or None,
+                        "date_to": date_to or None,
+                    },
+                    "metrics": [],
+                    "totals": None,
+                }
+            if len(exact) > 1:
+                return {
+                    "status": "ambiguous",
+                    "message": (
+                        f'Multiple ads share the exact name "{resolved_name}". '
+                        "Pass ad_id to query a specific ad."
+                    ),
+                    "ad_account_id": account,
+                    "ad_name": resolved_name,
+                    "matches": [
+                        {"id": row.get("id"), "name": row.get("name"), "status": row.get("effective_status")}
+                        for row in exact
+                    ],
+                    "metrics": [],
+                    "totals": None,
+                }
+            matched = exact[0]
+            resolved_id = str(matched.get("id") or "")
+            if not resolved_id:
+                raise MetaAdsToolError("Meta returned an ad without an id.")
+
+        params = graph.insights_params(date_preset, date_from or None, date_to or None, "")
+        rows = await graph.list_edge(
+            f"{graph.object_id(resolved_id)}/insights",
+            access_token,
+            INSIGHT_FIELDS,
+            100,
+            params,
+        )
+        period = {
+            "date_preset": date_preset if not (date_from or date_to) else None,
+            "date_from": date_from or None,
+            "date_to": date_to or None,
+        }
+        scope = {
+            "ad_account_id": account,
+            "ad_id": resolved_id,
+            "ad_name": resolved_name or (matched or {}).get("name"),
+            "campaign_id": (matched or {}).get("campaign_id"),
+            "adset_id": (matched or {}).get("adset_id"),
+            "status": (matched or {}).get("effective_status") or (matched or {}).get("status"),
+        }
+        if not rows:
+            return {
+                "status": "empty",
+                "message": f"No metrics were returned for ad {resolved_id} in the selected period.",
+                "scope": scope,
+                "period": period,
+                "metrics": [],
+                "totals": None,
+            }
+
+        def _num(row: dict[str, Any], key: str) -> float:
+            raw = row.get(key)
+            try:
+                return float(raw) if raw is not None and raw != "" else 0.0
+            except (TypeError, ValueError):
+                return 0.0
+
+        totals = {"spend": 0.0, "impressions": 0.0, "reach": 0.0, "clicks": 0.0}
+        for row in rows:
+            totals["spend"] += _num(row, "spend")
+            totals["impressions"] += _num(row, "impressions")
+            totals["reach"] += _num(row, "reach")
+            totals["clicks"] += _num(row, "clicks")
+        impressions = totals["impressions"]
+        clicks = totals["clicks"]
+        spend = totals["spend"]
+        totals["ctr"] = (clicks / impressions * 100.0) if impressions else 0.0
+        totals["cpc"] = (spend / clicks) if clicks else 0.0
+        totals["cpm"] = (spend / impressions * 1000.0) if impressions else 0.0
+        all_zero = all(value == 0.0 for value in (
+            totals["spend"], totals["impressions"], totals["reach"], totals["clicks"],
+        ))
+        return {
+            "status": "zero_metrics" if all_zero else "ok",
+            "message": (
+                "Meta returned rows, but all key metrics are zero for this ad and period."
+                if all_zero
+                else "Meta ad performance metrics returned successfully."
+            ),
+            "scope": scope,
+            "period": period,
+            "metrics": rows,
+            "totals": totals,
+        }
+
+    @mcp.tool
     async def get_account_insights(
         ad_account_id: str,
         access_token: str,

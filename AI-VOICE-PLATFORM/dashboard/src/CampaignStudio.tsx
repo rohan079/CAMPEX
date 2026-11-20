@@ -279,6 +279,8 @@ export function CampaignStudio({
         prompt: question,
         content: [headline.trim(), body.trim()].filter(Boolean).join("\n\n") || "No draft copy supplied.",
         ad_account_id: selectedAdAccountId || undefined,
+        client_id: client?.id || undefined,
+        client_name: client?.name || undefined,
       });
       setMessages((current) => [...current, {
         role: "assistant",

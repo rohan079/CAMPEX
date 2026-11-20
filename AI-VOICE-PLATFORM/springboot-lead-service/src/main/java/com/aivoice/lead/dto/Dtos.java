@@ -138,6 +138,8 @@ public final class Dtos {
             @NotBlank @Size(max = 2000) String prompt,
             @Size(max = 5000) String content,
             @Size(max = 64) String adAccountId,
+            @Size(max = 64) String clientId,
+            @Size(max = 160) String clientName,
             @Size(max = 120) String skillId,
             @Size(max = 3) List<AssistImage> images,
             @Pattern(regexp = "assist|design") String mode) {

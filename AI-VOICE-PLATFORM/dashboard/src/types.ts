@@ -97,6 +97,8 @@ export interface CampaignAssistRequest {
   prompt: string;
   content?: string;
   ad_account_id?: string;
+  client_id?: string;
+  client_name?: string;
   skill_id?: string;
   images?: AssistImagePayload[];
   mode?: "assist" | "design";

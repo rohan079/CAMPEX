@@ -62,9 +62,11 @@ function fileToPayload(file: File): Promise<LocalImage> {
 }
 
 export function AiCampaignAssistant({
+  clientId,
   clientName,
   onOpenChannels,
 }: {
+  clientId?: string;
   clientName?: string;
   onOpenChannels: () => void;
 }) {
@@ -205,6 +207,8 @@ export function AiCampaignAssistant({
         prompt: question,
         content: "No draft copy supplied.",
         ad_account_id: adAccountId || undefined,
+        client_id: clientId || undefined,
+        client_name: clientName || undefined,
         skill_id: skillId || undefined,
         mode: attached.length ? "design" : "assist",
         images: attached.map((image) => ({
@@ -244,6 +248,9 @@ export function AiCampaignAssistant({
             <div className="gpt-empty-mark" aria-hidden="true">✦</div>
             <h2>How can I help with your campaigns?</h2>
             <p>
+              {clientName
+                ? `Active client: ${clientName}. `
+                : "Select a client in the top bar before asking about that client’s ads. "}
               {metaReady
                 ? "Ask about Meta performance, run a skill, or attach images for ad design."
                 : "Connect Meta under Channels for live insights, or ask about copy and creative now."}
@@ -414,7 +421,9 @@ export function AiCampaignAssistant({
         </form>
 
         <p className="gpt-footnote">
-          {selectedSkill ? `Using ${selectedSkill.name}` : "No skill selected"}
+          {clientName ? `Client: ${clientName}` : "No client selected"}
+          {" · "}
+          {selectedSkill ? `Skill: ${selectedSkill.name}` : "No skill selected"}
           {metaReady ? " · Live Meta connected" : " · Draft mode"}
         </p>
       </div>

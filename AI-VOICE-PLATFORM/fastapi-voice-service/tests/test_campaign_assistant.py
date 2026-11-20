@@ -38,7 +38,9 @@ async def test_openai_assistant_uses_server_key_and_returns_copy():
     body = seen["body"].lower()
     assert "never invent prices" in body
     assert "get_meta_performance_report" in body
+    assert "get_ad_performance" in body
     assert "campex ai campaign assistant" in body
+    assert "p&j tech" in body
 
 
 @pytest.mark.asyncio
