@@ -42,7 +42,8 @@ AI-VOICE-PLATFORM/
 │       ├── entity/       Lead, LeadConsent, VoiceCall, WhatsAppEvent, Client, Ad, Sale
 │       ├── config/       AppProperties, AppConfig (CORS), ApiKeyFilter, ApiExceptionHandler
 │       └── dto/          JSON shapes (snake_case)
-│   └── src/main/resources/db/migration/    V1__init.sql, V2__clients_sales_reach.sql  ← the schema (Flyway)
+│   └── src/main/resources/db/migration/    V1__init.sql … V14__client_ad_accounts.sql  ← the schema (Flyway)
+│   └── src/main/resources/static/campex.js  website tracking SDK (Phase 1)
 ├── fastapi-voice-service/
 │   ├── api/              call_controller.py, edesy_webhook.py, media_edesy.py
 │   ├── services/         hf_realtime.py, openai_realtime_speech.py, telephony_service.py,
@@ -112,6 +113,19 @@ Events are idempotent and may arrive out of order; the lead service never moves 
 
 **Never auto-retry a call start that might have dialled.** A `504`, a timeout, or a crash after `initiating` marks
 the call `initiation_unknown` and blocks further queuing for that lead until a person checks.
+
+## Phase 1: measurement foundation
+
+Meta Pixel + Conversions API, conversion events, campaign→lead→sale attribution, the CRM pipeline and site visits.
+Full design, API list, Meta setup, pixel installation and limitations: **[docs/PHASE1_MEASUREMENT.md](docs/PHASE1_MEASUREMENT.md)**.
+
+- Flyway V9–V14 add tenant memberships, pixels, conversion events (a database outbox), attribution, CRM and sales
+  lifecycle tables. Existing statuses (`leads.status`, `leads.review_status`) are unchanged.
+- Websites load `/campex.js` from the lead service and post to the public `POST /api/tracking/events`
+  (origin-checked against the pixel's domains, consent-gated, rate-limited, deduplicated).
+- Events reach Meta only when `META_CAPI_ENABLED=true`, the pixel has an encrypted CAPI token and consent allows it.
+- Phase 1 routes enforce client membership; set `CAMPEX_PLATFORM_ADMIN_EMAILS` before deploying.
+- Database-backed tests: `CAMPEX_IT_DATABASE_URL=jdbc:postgresql://…/disposable_db mvn test`.
 
 ## Clients, sales and reach (the marketing dashboard)
 

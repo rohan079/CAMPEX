@@ -84,6 +84,29 @@ public class Lead {
     @Column(name = "follow_up_end")
     private LocalDate followUpEnd;
 
+    /** Operational CRM status (NEW … WON/LOST); independent of {@link #status} and {@link #reviewStatus}. */
+    @Column(name = "pipeline_status", nullable = false, length = 32)
+    private String pipelineStatus = PipelineStatus.NEW.name();
+
+    @Column(name = "pipeline_updated_at")
+    private Instant pipelineUpdatedAt;
+
+    @Column(name = "email", length = 320)
+    private String email;
+
+    @Column(name = "assigned_agent_id")
+    private UUID assignedAgentId;
+
+    @Column(name = "project_id")
+    private UUID projectId;
+
+    /** First time anyone from the sales team reached out; drives response-time reporting. */
+    @Column(name = "first_contacted_at")
+    private Instant firstContactedAt;
+
+    @Column(name = "lost_reason", length = 500)
+    private String lostReason;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 

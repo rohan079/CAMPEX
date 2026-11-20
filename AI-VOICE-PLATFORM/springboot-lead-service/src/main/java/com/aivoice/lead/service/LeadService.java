@@ -1,6 +1,7 @@
 package com.aivoice.lead.service;
 
 import com.aivoice.lead.config.AppProperties;
+import com.aivoice.lead.dto.AttributionDtos.AttributionInput;
 import com.aivoice.lead.dto.Dtos.AdLeadRequest;
 import com.aivoice.lead.dto.Dtos.AdLeadResponse;
 import com.aivoice.lead.dto.Dtos.CallDto;
@@ -26,6 +27,8 @@ import com.aivoice.lead.repository.WhatsAppEventRepository;
 import com.aivoice.lead.service.Exceptions.MessageDeliveryException;
 import com.aivoice.lead.service.Exceptions.NotFoundException;
 import com.aivoice.lead.service.LanguageService.Kind;
+import com.aivoice.lead.service.attribution.AttributionResolver;
+import com.aivoice.lead.service.attribution.AttributionService;
 import com.aivoice.lead.service.WhatsAppService.InboundMessage;
 import jakarta.persistence.criteria.Predicate;
 import java.time.Clock;
@@ -79,11 +82,13 @@ public class LeadService {
     private final AppProperties props;
     private final Clock clock;
     private final TransactionTemplate tx;
+    private final AttributionService attribution;
 
     public LeadService(LeadRepository leads, VoiceCallRepository calls, WhatsAppEventRepository events,
                        ConsentService consent, LanguageService languages, FollowUpPolicy followUp,
                        WhatsAppService whatsApp, VoiceServiceClient voice, LeadMapper mapper,
-                       ClientService clients, AppProperties props, Clock clock, PlatformTransactionManager txManager) {
+                       ClientService clients, AppProperties props, Clock clock, PlatformTransactionManager txManager,
+                       AttributionService attribution) {
         this.leads = leads;
         this.calls = calls;
         this.events = events;
@@ -97,6 +102,7 @@ public class LeadService {
         this.props = props;
         this.clock = clock;
         this.tx = new TransactionTemplate(txManager);
+        this.attribution = attribution;
     }
 
     // ------------------------------------------------------------------ ad popup
@@ -166,8 +172,24 @@ public class LeadService {
             lead.setFirstName(request.name());
         }
         fillAdFields(lead, request.adId(), request.campaignId(), request.adHeadline(), request.adBody());
+        if (hasText(request.email()) && !hasText(lead.getEmail())) {
+            lead.setEmail(request.email().trim().toLowerCase());
+        }
         lead = leads.saveAndFlush(lead);
+        recordPopupAttribution(lead, request);
         return new Prepared(lead.getId(), message, alreadyReplied, phone);
+    }
+
+    /** The popup's own ad/campaign parameters plus any website evidence it forwarded (Campex.getAttribution()). */
+    private void recordPopupAttribution(Lead lead, AdLeadRequest request) {
+        AttributionInput in = request.attribution() == null ? AttributionInput.empty() : request.attribution();
+        String source = "website".equals(in.source()) || "landing_page".equals(in.source()) ? in.source()
+                : LeadStatus.SOURCE_AD_POPUP;
+        attribution.recordTouch(lead, source, new AttributionInput(source,
+                firstText(in.campaignId(), request.campaignId()), in.campaignName(), in.adsetId(), in.adsetName(),
+                firstText(in.adId(), request.adId()), in.adName(), in.metaFormId(), in.metaLeadId(), in.utmSource(),
+                in.utmMedium(), in.utmCampaign(), in.utmContent(), in.utmTerm(), in.fbclid(), in.fbc(), in.fbp(),
+                in.landingPage(), in.referrer(), in.visitorId(), in.sessionId()));
     }
 
     private AdLeadResponse adResponse(Lead lead, String status) {
@@ -211,6 +233,8 @@ public class LeadService {
         }
         if (ad != null) {
             fillAdFields(lead, ad.adId(), ad.campaignId(), ad.headline(), ad.body());
+            // A new ad interaction moves last-touch; first-touch is never overwritten.
+            attribution.recordTouch(lead, LeadStatus.SOURCE_CTWA, AttributionResolver.fromWhatsAppReferral(m.referral()));
         }
 
         if (ConsentService.isNotInterested(text)) {
@@ -265,6 +289,7 @@ public class LeadService {
             fillAdFields(lead, ad.adId(), ad.campaignId(), ad.headline(), ad.body());
             scheduleFollowUp(lead, now);
             leads.save(lead);
+            attribution.recordTouch(lead, LeadStatus.SOURCE_CTWA, AttributionResolver.fromWhatsAppReferral(m.referral()));
             String details = languages.adDetails(language, clients.businessName(client), lead.getAdHeadline(),
                     lead.getAdBody(), clients.businessDescription(client));
             return new InboundResult(details, "ad_outreach");
@@ -276,6 +301,8 @@ public class LeadService {
             lead.setAdId(asString(m.referral().get("ad_id")));
         }
         leads.save(lead);
+        attribution.recordTouch(lead, m.referral() != null ? "whatsapp_referral" : LeadStatus.SOURCE_WHATSAPP,
+                AttributionResolver.fromWhatsAppReferral(m.referral()));
         return new InboundResult(languages.message(Kind.CONSENT, language), "new_lead");
     }
 

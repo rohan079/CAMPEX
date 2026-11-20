@@ -17,6 +17,34 @@ public final class Exceptions {
         }
     }
 
+    /** Authenticated, but not allowed to access this client's data. */
+    public static class ForbiddenException extends RuntimeException {
+        public ForbiddenException(String message) {
+            super(message);
+        }
+    }
+
+    /** The request conflicts with the current state (for example an illegal lifecycle transition). */
+    public static class ConflictException extends RuntimeException {
+        public ConflictException(String message) {
+            super(message);
+        }
+    }
+
+    /** Public endpoint rate limit exceeded. */
+    public static class RateLimitedException extends RuntimeException {
+        private final long retryAfterSeconds;
+
+        public RateLimitedException(String message, long retryAfterSeconds) {
+            super(message);
+            this.retryAfterSeconds = retryAfterSeconds;
+        }
+
+        public long retryAfterSeconds() {
+            return retryAfterSeconds;
+        }
+    }
+
     public static class MessageDeliveryException extends RuntimeException {
         public MessageDeliveryException(String message, Throwable cause) {
             super(message, cause);

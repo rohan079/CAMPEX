@@ -8,6 +8,8 @@ public final class LeadStatus {
     public static final String SOURCE_WHATSAPP = "whatsapp";
     public static final String SOURCE_AD_POPUP = "ad_popup";
     public static final String SOURCE_CTWA = "ctwa";
+    public static final String SOURCE_MANUAL = "manual";
+    public static final String SOURCE_WEBSITE = "website";
     public static final Set<String> AD_SOURCES = Set.of(SOURCE_AD_POPUP, SOURCE_CTWA);
 
     public static final String AWAITING_CONSENT = "awaiting_consent";

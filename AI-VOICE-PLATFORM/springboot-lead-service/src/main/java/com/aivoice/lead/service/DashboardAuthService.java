@@ -15,6 +15,9 @@ import org.springframework.stereotype.Service;
 @Service
 public class DashboardAuthService {
 
+    /** Request attribute holding the {@link AdminIdentity} verified by {@code ApiKeyFilter}. */
+    public static final String IDENTITY_ATTRIBUTE = "campex.identity";
+
     private final FirebaseAuthProperties firebaseProperties;
     private final FirebaseTokenVerifier firebaseTokens;
 
@@ -49,6 +52,17 @@ public class DashboardAuthService {
 
         VerifiedFirebaseUser user = firebaseTokens.verifyIdToken(idToken);
         return new AdminIdentity(user.email(), Instant.now().plusSeconds(3600));
+    }
+
+    /** The identity already verified for this request by the filter, or a fresh verification. */
+    public AdminIdentity currentIdentity(HttpServletRequest request) {
+        Object cached = request.getAttribute(IDENTITY_ATTRIBUTE);
+        if (cached instanceof AdminIdentity identity) {
+            return identity;
+        }
+        AdminIdentity identity = requireAuthenticated(request);
+        request.setAttribute(IDENTITY_ATTRIBUTE, identity);
+        return identity;
     }
 
     public String requireOwnerEmail(HttpServletRequest request) {

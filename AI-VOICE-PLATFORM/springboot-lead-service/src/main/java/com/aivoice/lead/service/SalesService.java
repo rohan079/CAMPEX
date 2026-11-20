@@ -75,6 +75,7 @@ public class SalesService {
     public SalePage list(UUID clientId, String channel, int limit, long offset) {
         Specification<Sale> spec = (root, query, cb) -> {
             List<Predicate> predicates = new ArrayList<>();
+            predicates.add(cb.isNull(root.get("deletedAt")));
             if (clientId != null) {
                 predicates.add(cb.equal(root.get("clientId"), clientId));
             }
@@ -91,10 +92,11 @@ public class SalesService {
         return new SalePage(rows, page.getTotalElements());
     }
 
+    /** Soft delete: the row and its audit history are kept, but it leaves every list and report. */
     @Transactional
     public void delete(UUID id) {
-        Sale sale = sales.findById(id).orElseThrow(() -> new NotFoundException("Sale not found"));
-        sales.delete(sale);
+        Sale sale = sales.findByIdAndDeletedAtIsNull(id).orElseThrow(() -> new NotFoundException("Sale not found"));
+        sale.setDeletedAt(clock.instant());
     }
 
     private SaleDto toDto(Sale s, Lead lead) {

@@ -70,7 +70,9 @@ public class LeadMapper {
                 lead.getUpdatedAt(),
                 latest,
                 callDtos,
-                locked);
+                locked,
+                lead.getPipelineStatus(),
+                lead.getAssignedAgentId() == null ? null : lead.getAssignedAgentId().toString());
     }
 
     private LatestCallDto toLatest(VoiceCall call) {

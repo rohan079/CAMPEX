@@ -1,6 +1,9 @@
 package com.aivoice.lead.config;
 
 import com.aivoice.lead.service.Exceptions.CampaignAssistException;
+import com.aivoice.lead.service.Exceptions.ConflictException;
+import com.aivoice.lead.service.Exceptions.ForbiddenException;
+import com.aivoice.lead.service.Exceptions.RateLimitedException;
 import com.aivoice.lead.service.Exceptions.InvalidPhoneException;
 import com.aivoice.lead.service.Exceptions.MessageDeliveryException;
 import com.aivoice.lead.service.Exceptions.NotFoundException;
@@ -30,6 +33,23 @@ public class ApiExceptionHandler {
     @ExceptionHandler(NotFoundException.class)
     public ResponseEntity<Map<String, String>> notFound(NotFoundException e) {
         return body(HttpStatus.NOT_FOUND, e.getMessage());
+    }
+
+    @ExceptionHandler(ForbiddenException.class)
+    public ResponseEntity<Map<String, String>> forbidden(ForbiddenException e) {
+        return body(HttpStatus.FORBIDDEN, e.getMessage());
+    }
+
+    @ExceptionHandler(ConflictException.class)
+    public ResponseEntity<Map<String, String>> conflict(ConflictException e) {
+        return body(HttpStatus.CONFLICT, e.getMessage());
+    }
+
+    @ExceptionHandler(RateLimitedException.class)
+    public ResponseEntity<Map<String, String>> rateLimited(RateLimitedException e) {
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                .header("Retry-After", Long.toString(e.retryAfterSeconds()))
+                .body(Map.of("detail", e.getMessage()));
     }
 
     @ExceptionHandler(AuthException.class)

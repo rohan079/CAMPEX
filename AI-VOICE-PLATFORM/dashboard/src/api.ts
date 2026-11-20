@@ -58,7 +58,7 @@ function publicErrorMessage(status: number, raw?: string): string {
   return "Request could not be completed. Try again.";
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const headers = await authHeaders(init);
   let response: Response;
   try {
