@@ -65,6 +65,13 @@ class CampaignAssistRequest(BaseModel):
     skill_id: str | None = Field(default=None, max_length=120)
     images: list[AssistImage] = Field(default_factory=list, max_length=3)
     mode: Literal["assist", "design"] = "assist"
+    generate_image: bool = False
+
+
+class GeneratedAssistImage(BaseModel):
+    mime_type: Literal["image/png", "image/jpeg", "image/webp"] = "image/png"
+    data_base64: str
+    prompt: str | None = None
 
 
 class CampaignAssistResponse(BaseModel):
@@ -77,6 +84,8 @@ class CampaignAssistResponse(BaseModel):
     design_notes: str | None = None
     skill_id: str | None = None
     tools_used: list[str] = Field(default_factory=list)
+    generated_images: list[GeneratedAssistImage] = Field(default_factory=list)
+    image_error: str | None = None
 
 
 class SkillSummary(BaseModel):

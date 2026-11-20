@@ -19,6 +19,7 @@ type ChatMessage = {
   role: "user" | "assistant";
   content: string;
   imageUrl?: string;
+  generatedImageUrls?: string[];
 };
 
 type LocalImage = {
@@ -80,6 +81,7 @@ export function AiCampaignAssistant({
   const [prompt, setPrompt] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [images, setImages] = useState<LocalImage[]>([]);
+  const [generateImage, setGenerateImage] = useState(false);
   const [busy, setBusy] = useState(false);
   const [skillBusy, setSkillBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -139,6 +141,7 @@ export function AiCampaignAssistant({
         next.push(await fileToPayload(file));
       }
       setImages(next);
+      setGenerateImage(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not load images");
     } finally {
@@ -199,6 +202,7 @@ export function AiCampaignAssistant({
     setError(null);
     setSkillMenuOpen(false);
     try {
+      const shouldGenerate = generateImage || /generate|create.*(image|creative|ad)/i.test(question);
       const result = await assistCampaign({
         campaign_name: clientName ? `${clientName} campaign` : "Campaign assistant",
         objective: "leads",
@@ -210,16 +214,24 @@ export function AiCampaignAssistant({
         client_id: clientId || undefined,
         client_name: clientName || undefined,
         skill_id: skillId || undefined,
-        mode: attached.length ? "design" : "assist",
+        mode: attached.length || shouldGenerate ? "design" : "assist",
+        generate_image: shouldGenerate,
         images: attached.map((image) => ({
           name: image.name,
           mime_type: image.mime,
           data_base64: image.dataBase64,
         })),
       });
+      const generatedImageUrls = (result.generated_images ?? []).map(
+        (image) => `data:${image.mime_type};base64,${image.data_base64}`,
+      );
+      const reply = result.image_error
+        ? `${result.reply}\n\nImage generation note: ${result.image_error}`
+        : result.reply;
       setMessages((current) => [...current, {
         role: "assistant",
-        content: result.reply,
+        content: reply,
+        generatedImageUrls: generatedImageUrls.length ? generatedImageUrls : undefined,
       }]);
       setImages([]);
     } catch (err) {
@@ -252,7 +264,7 @@ export function AiCampaignAssistant({
                 ? `Active client: ${clientName}. `
                 : "Select a client in the top bar before asking about that client’s ads. "}
               {metaReady
-                ? "Ask about Meta performance, run a skill, or attach images for ad design."
+                ? "Ask about Meta performance, run a skill, or turn on Generate image to create ad creatives."
                 : "Connect Meta under Channels for live insights, or ask about copy and creative now."}
             </p>
             {!metaReady && (
@@ -286,6 +298,12 @@ export function AiCampaignAssistant({
                 <div className="gpt-bubble">
                   {message.imageUrl && <img className="gpt-attach" src={message.imageUrl} alt="" />}
                   <p>{message.content}</p>
+                  {message.generatedImageUrls?.map((url, imageIndex) => (
+                    <figure key={`${index}-gen-${imageIndex}`} className="gpt-generated">
+                      <img src={url} alt="Generated ad creative" />
+                      <a className="text-button" href={url} download={`campex-ad-${index + 1}.png`}>Download</a>
+                    </figure>
+                  ))}
                 </div>
               </article>
             ))}
@@ -391,6 +409,14 @@ export function AiCampaignAssistant({
                 onClick={() => imageInputRef.current?.click()}
               >
                 {images.length ? `Image · ${images.length}` : "Upload image"}
+              </button>
+              <button
+                type="button"
+                className={`gpt-tool${generateImage ? " active" : ""}`}
+                aria-pressed={generateImage}
+                onClick={() => setGenerateImage((value) => !value)}
+              >
+                {generateImage ? "Generate image · On" : "Generate image · Off"}
               </button>
               <input
                 ref={skillInputRef}

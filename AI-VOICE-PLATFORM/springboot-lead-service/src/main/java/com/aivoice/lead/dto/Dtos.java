@@ -142,7 +142,14 @@ public final class Dtos {
             @Size(max = 160) String clientName,
             @Size(max = 120) String skillId,
             @Size(max = 3) List<AssistImage> images,
-            @Pattern(regexp = "assist|design") String mode) {
+            @Pattern(regexp = "assist|design") String mode,
+            Boolean generateImage) {
+    }
+
+    public record GeneratedAssistImage(
+            String mimeType,
+            String dataBase64,
+            String prompt) {
     }
 
     public record CampaignAssistResponse(
@@ -154,7 +161,9 @@ public final class Dtos {
             String suggestedCta,
             String designNotes,
             String skillId,
-            List<String> toolsUsed) {
+            List<String> toolsUsed,
+            List<GeneratedAssistImage> generatedImages,
+            String imageError) {
     }
 
     public record SkillSummary(

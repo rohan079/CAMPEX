@@ -58,6 +58,11 @@ class Settings(BaseSettings):
     ai_api_key: str = ""
     ai_model: str = "gpt-4o-mini"
     ai_timeout_seconds: float = 45
+    # Ad creative image generation (OpenAI Images API). Disabled for openai_compatible unless configured.
+    ai_image_model: str = "dall-e-3"
+    ai_image_size: str = "1024x1024"
+    ai_image_timeout_seconds: float = 90
+    ai_image_enabled: bool = True
 
     # Meta Marketing API version used by the private Meta Ads MCP server.
     meta_graph_api_version: str = Field(default="v27.0", pattern=r"^v\d+\.\d+$")

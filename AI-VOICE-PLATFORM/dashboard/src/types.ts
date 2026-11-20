@@ -102,6 +102,13 @@ export interface CampaignAssistRequest {
   skill_id?: string;
   images?: AssistImagePayload[];
   mode?: "assist" | "design";
+  generate_image?: boolean;
+}
+
+export interface GeneratedAssistImage {
+  mime_type: "image/png" | "image/jpeg" | "image/webp";
+  data_base64: string;
+  prompt?: string | null;
 }
 
 export interface CampaignAssistResponse {
@@ -114,6 +121,8 @@ export interface CampaignAssistResponse {
   design_notes?: string | null;
   skill_id?: string | null;
   tools_used?: string[];
+  generated_images?: GeneratedAssistImage[];
+  image_error?: string | null;
 }
 
 export interface CampaignSkillSummary {

@@ -941,6 +941,18 @@ button:disabled { cursor: not-allowed; opacity: .52; }
   border-radius: 12px;
   border: 1px solid #ebe8f4;
 }
+.gpt-generated {
+  margin: 12px 0 0;
+  max-width: min(420px, 100%);
+}
+.gpt-generated img {
+  display: block;
+  width: 100%;
+  border-radius: 14px;
+  border: 1px solid #ebe8f4;
+  background: #f7f6fb;
+}
+.gpt-generated .text-button { margin-top: 8px; }
 .gpt-dock {
   position: sticky;
   bottom: 0;

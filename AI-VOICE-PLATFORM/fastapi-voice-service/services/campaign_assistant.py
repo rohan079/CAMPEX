@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import logging
 import re
@@ -13,7 +14,7 @@ from fastmcp import Client, FastMCP
 from fastmcp.exceptions import FastMCPError, ToolError
 
 from config import Settings
-from schemas import CampaignAssistRequest, CampaignAssistResponse
+from schemas import CampaignAssistRequest, CampaignAssistResponse, GeneratedAssistImage
 from services.skill_registry import SkillRegistry
 
 logger = logging.getLogger(__name__)
@@ -103,7 +104,10 @@ def _tool_result_text(result: Any) -> str:
 
 
 def _section(reply: str, label: str) -> str | None:
-    pattern = rf"(?is){re.escape(label)}\s*:\s*(.+?)(?=\n(?:summary|design notes|suggested headline|suggested copy|cta)\s*:|\Z)"
+    pattern = (
+        rf"(?is){re.escape(label)}\s*:\s*(.+?)"
+        rf"(?=\n(?:summary|design notes|suggested headline|suggested copy|cta|image prompt)\s*:|\Z)"
+    )
     match = re.search(pattern, reply)
     if not match:
         return None
@@ -164,6 +168,9 @@ class CampaignAssistantService:
                 raise CampaignAssistantUnavailable("Selected skill was not found")
 
         use_design = request.mode == "design" or bool(request.images)
+        want_image = bool(request.generate_image) or (
+            use_design and self._wants_image_generation(request.prompt)
+        )
         active_client = (request.client_name or "").strip()
         client_binding = (
             f"Active workspace client: {active_client} (id={request.client_id}). "
@@ -192,8 +199,13 @@ class CampaignAssistantService:
                 f"\n\nActive skill ({selected_skill.name}):\n"
                 f"{selected_skill.body[:12_000]}"
             )
-        if use_design:
+        if use_design or want_image:
             system += "\n\nAd creative design guidance:\n" + self._skills.design_skill_text()
+            if want_image:
+                system += (
+                    "\nThe platform will generate a new ad image from your Image prompt section. "
+                    "Always include a detailed Image prompt."
+                )
         if not meta_access_token:
             system += (
                 "\nNo Meta Business connection is available for this request. "
@@ -201,7 +213,8 @@ class CampaignAssistantService:
             )
 
         text_user = (
-            f"Mode: {'ad design' if use_design else 'campaign assist'}\n"
+            f"Mode: {'ad design' if use_design or want_image else 'campaign assist'}\n"
+            f"Generate image: {'yes' if want_image else 'no'}\n"
             f"Active workspace client: {request.client_name or 'not selected'}\n"
             f"Active workspace client id: {request.client_id or 'not selected'}\n"
             f"Campaign: {request.campaign_name}\nObjective: {request.objective}\n"
@@ -215,7 +228,10 @@ class CampaignAssistantService:
         )
         if request.images:
             names = ", ".join(image.name for image in request.images)
-            text_user += f"\n\nUploaded creative images: {names}. Analyze them for ad design."
+            text_user += (
+                f"\n\nUploaded reference images: {names}. Use them as visual inspiration for design notes "
+                "and the Image prompt; the generated creative should be a polished feed ad, not a raw photo copy."
+            )
 
         user_content: str | list[dict[str, Any]]
         if request.images:
@@ -238,10 +254,11 @@ class CampaignAssistantService:
 
         skill_id = selected_skill.id if selected_skill else None
         try:
-            async with httpx.AsyncClient(timeout=settings.ai_timeout_seconds, transport=self._transport) as client:
-                if meta_access_token and self._meta_mcp is not None:
+            timeout = max(settings.ai_timeout_seconds, settings.ai_image_timeout_seconds if want_image else 0)
+            async with httpx.AsyncClient(timeout=timeout, transport=self._transport) as client:
+                if meta_access_token and self._meta_mcp is not None and not want_image:
                     try:
-                        return await self._assist_with_meta_tools(
+                        result = await self._assist_with_meta_tools(
                             client, headers, system, user_content, meta_access_token, skill_id=skill_id,
                         )
                     except CampaignAssistantUnavailable as exc:
@@ -251,12 +268,17 @@ class CampaignAssistantService:
                             "\nMeta Ads tools failed for this request. Answer from the supplied draft only "
                             "and say live Meta metrics were unavailable."
                         )
-                        return await self._complete_without_tools(
+                        result = await self._complete_without_tools(
                             client, headers, system, user_content, skill_id=skill_id,
                         )
-                return await self._complete_without_tools(
-                    client, headers, system, user_content, skill_id=skill_id,
-                )
+                else:
+                    # Skip Meta tool loop for image generation turns so the model focuses on creative output.
+                    result = await self._complete_without_tools(
+                        client, headers, system, user_content, skill_id=skill_id,
+                    )
+                if want_image:
+                    return await self._attach_generated_image(client, headers, result, request)
+                return result
         except httpx.HTTPError as exc:
             logger.warning("Campaign AI request failed (%s)", exc.__class__.__name__)
             raise CampaignAssistantUnavailable("Campaign AI endpoint could not be reached") from exc
@@ -398,6 +420,8 @@ class CampaignAssistantService:
         tools_used: list[str],
         *,
         skill_id: str | None = None,
+        generated_images: list[GeneratedAssistImage] | None = None,
+        image_error: str | None = None,
     ) -> CampaignAssistResponse:
         return CampaignAssistResponse(
             reply=reply,
@@ -409,4 +433,138 @@ class CampaignAssistantService:
             design_notes=_section(reply, "Design notes"),
             skill_id=skill_id,
             tools_used=tools_used,
+            generated_images=generated_images or [],
+            image_error=image_error,
         )
+
+    @staticmethod
+    def _wants_image_generation(prompt: str) -> bool:
+        text = prompt.lower()
+        triggers = (
+            "generate image",
+            "generate an image",
+            "create image",
+            "create an image",
+            "generate ad",
+            "create ad creative",
+            "generate creative",
+            "design an ad",
+            "make an ad image",
+            "render",
+            "dall-e",
+            "image generation",
+        )
+        return any(trigger in text for trigger in triggers)
+
+    def _image_prompt_from_reply(self, reply: str, request: CampaignAssistRequest) -> str:
+        explicit = _section(reply, "Image prompt")
+        if explicit:
+            return explicit[:3500]
+        headline = _section(reply, "Suggested headline") or request.campaign_name
+        copy = _suggested_copy(reply) or request.content or request.prompt
+        cta = _section(reply, "CTA") or "Learn more"
+        client = (request.client_name or "").strip()
+        return (
+            f"Photorealistic Facebook/Instagram feed ad creative for a real-estate campaign"
+            f"{f' for {client}' if client else ''}. "
+            f"Headline concept: {headline}. Primary message: {copy}. CTA concept: {cta}. "
+            "Clean modern lifestyle property photography, soft natural light, generous negative space "
+            "for text, mobile-first composition, no logos, no tiny unreadable text, no watermark."
+        )[:3500]
+
+    async def _attach_generated_image(
+        self,
+        client: httpx.AsyncClient,
+        headers: dict[str, str],
+        result: CampaignAssistResponse,
+        request: CampaignAssistRequest,
+    ) -> CampaignAssistResponse:
+        settings = self._settings
+        if not settings.ai_image_enabled:
+            return result.model_copy(update={
+                "image_error": "Image generation is disabled on the server.",
+            })
+        if settings.ai_provider != "openai" and "openai.com" not in settings.ai_base_url:
+            # Compatible endpoints may not support /images/generations.
+            if not settings.campaign_ai_api_key and settings.ai_provider != "openai":
+                return result.model_copy(update={
+                    "image_error": "Image generation requires an OpenAI-compatible Images API key.",
+                })
+        if not settings.campaign_ai_api_key and settings.ai_provider == "openai":
+            return result.model_copy(update={
+                "image_error": "Image generation is not configured (missing API key).",
+            })
+
+        prompt = self._image_prompt_from_reply(result.reply, request)
+        payload = {
+            "model": settings.ai_image_model,
+            "prompt": prompt,
+            "size": settings.ai_image_size,
+            "n": 1,
+            "response_format": "b64_json",
+        }
+        if settings.ai_image_model.startswith("dall-e-3"):
+            payload["quality"] = "standard"
+
+        try:
+            response = await client.post(
+                f"{settings.ai_base_url.rstrip('/')}/images/generations",
+                json=payload,
+                headers=headers,
+                timeout=settings.ai_image_timeout_seconds,
+            )
+        except httpx.HTTPError as exc:
+            logger.warning("Image generation request failed (%s)", type(exc).__name__)
+            return result.model_copy(update={
+                "image_error": "Image generation endpoint could not be reached.",
+            })
+
+        if response.is_error:
+            detail = "Image generation failed."
+            try:
+                body = response.json()
+                err = body.get("error") if isinstance(body, dict) else None
+                if isinstance(err, dict) and isinstance(err.get("message"), str):
+                    detail = err["message"]
+                elif isinstance(body, dict) and isinstance(body.get("detail"), str):
+                    detail = body["detail"]
+            except ValueError:
+                detail = f"Image generation returned HTTP {response.status_code}"
+            logger.warning("Image generation failed (HTTP %s)", response.status_code)
+            return result.model_copy(update={"image_error": detail})
+
+        try:
+            body = response.json()
+        except ValueError:
+            return result.model_copy(update={"image_error": "Image generation returned invalid JSON."})
+
+        data = body.get("data") if isinstance(body, dict) else None
+        if not isinstance(data, list) or not data:
+            return result.model_copy(update={"image_error": "Image generation returned no image data."})
+        first = data[0] if isinstance(data[0], dict) else {}
+        b64 = first.get("b64_json")
+        if not isinstance(b64, str) or not b64.strip():
+            # Some providers return a URL only.
+            url = first.get("url")
+            if isinstance(url, str) and url.startswith("http"):
+                try:
+                    downloaded = await client.get(url, timeout=settings.ai_image_timeout_seconds)
+                except httpx.HTTPError:
+                    return result.model_copy(update={"image_error": "Could not download generated image."})
+                if downloaded.is_error or not downloaded.content:
+                    return result.model_copy(update={"image_error": "Could not download generated image."})
+                b64 = base64.b64encode(downloaded.content).decode("ascii")
+            else:
+                return result.model_copy(update={"image_error": "Image generation returned no image payload."})
+
+        generated = GeneratedAssistImage(
+            mime_type="image/png",
+            data_base64=b64.strip(),
+            prompt=prompt,
+        )
+        note = "\n\nGenerated ad creative image is attached below."
+        return result.model_copy(update={
+            "reply": result.reply + note,
+            "generated_images": [generated],
+            "image_error": None,
+        })
