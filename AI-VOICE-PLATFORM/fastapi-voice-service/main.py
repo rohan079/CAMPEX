@@ -8,6 +8,7 @@ from fastapi.responses import JSONResponse
 from api import (
     campaign_assistant,
     call_controller,
+    creative,
     edesy_webhook,
     media_edesy,
     meta_campaigns,
@@ -53,6 +54,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="AI Voice Platform - Voice Service", version="0.1.0", lifespan=lifespan)
 app.include_router(call_controller.router)
 app.include_router(campaign_assistant.router)
+app.include_router(creative.router)
 app.include_router(performance.router)
 app.include_router(meta_campaigns.router)
 app.include_router(meta_dashboard.router)

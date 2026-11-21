@@ -21,6 +21,8 @@ export interface CampaignConfig {
   cta: string;
   destination_url?: string | null;
   page_id?: string | null;
+  creative_asset_id?: string | null;
+  creative_version?: number | null;
 }
 
 export interface ValidationIssue { field: string; code: string; message: string }

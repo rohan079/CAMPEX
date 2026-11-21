@@ -11,6 +11,7 @@ vi.mock("../../src/executionApi", () => ({
   publishExecution: vi.fn(), retryExecution: vi.fn(), reconcileExecution: vi.fn(), cancelExecution: vi.fn(),
   listNotifications: vi.fn(), markNotificationRead: vi.fn(), markAllNotificationsRead: vi.fn(),
 }));
+vi.mock("../../src/creativeApi", () => ({ listCreatives: vi.fn(async () => []), getCreative: vi.fn() }));
 const m = vi.mocked(api);
 
 function summary(status: ExecutionStatus, over: Partial<ExecutionSummary> = {}): ExecutionSummary {

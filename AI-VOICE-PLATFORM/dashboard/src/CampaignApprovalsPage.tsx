@@ -9,6 +9,8 @@ import type {
 import { formatWhen } from "./format";
 import { ClientRequired, ErrorBanner, errorText } from "./measurementUi";
 import { actorName } from "./privacy";
+import { getCreative, listCreatives } from "./creativeApi";
+import type { CreativeSummary } from "./creativeTypes";
 
 /** Phase 3 Approval Center + execution history. Every action is re-checked by the server. */
 
@@ -208,7 +210,7 @@ function ExecutionDrawer({ id, onClose, onChanged }: { id: string; onClose: () =
             )}
 
             {editing ? (
-              <ConfigForm initial={detail.config} submitLabel="Save changes" busy={busy === "edit"}
+              <ConfigForm clientId={ex.client_id} initial={detail.config} submitLabel="Save changes" busy={busy === "edit"}
                 onCancel={() => setEditing(false)}
                 onSubmit={(config) => run("edit", async () => { const r = await updateExecution(id, config); setEditing(false); return r; },
                   "Saved as a new version. Validate and submit it again for approval.")} />
@@ -366,13 +368,28 @@ function ConfigFacts({ config }: { config: CampaignConfig }) {
 
 const CTA_OPTIONS = ["LEARN_MORE", "SIGN_UP", "CONTACT_US", "MESSAGE_PAGE", "BOOK_NOW", "GET_QUOTE", "APPLY_NOW"];
 
-export function ConfigForm({ initial, submitLabel, busy, onSubmit, onCancel }: {
-  initial: CampaignConfig; submitLabel: string; busy: boolean;
+export function ConfigForm({ clientId, initial, submitLabel, busy, onSubmit, onCancel }: {
+  clientId?: string; initial: CampaignConfig; submitLabel: string; busy: boolean;
   onSubmit: (config: CampaignConfig) => void; onCancel: () => void;
 }) {
   const [c, setC] = useState<CampaignConfig>(initial);
   const [budget, setBudget] = useState(String(Math.round((initial.daily_budget_minor ?? 0) / 100) || ""));
   const set = <K extends keyof CampaignConfig>(key: K, value: CampaignConfig[K]) => setC((prev) => ({ ...prev, [key]: value }));
+  const [creatives, setCreatives] = useState<CreativeSummary[]>([]);
+  useEffect(() => {
+    if (!clientId) return;
+    listCreatives(clientId, "APPROVED").then(setCreatives).catch(() => setCreatives([]));
+  }, [clientId]);
+  const locked = Boolean(c.creative_asset_id);
+  async function attach(assetId: string) {
+    if (!assetId) { setC((prev) => ({ ...prev, creative_asset_id: null, creative_version: null })); return; }
+    const d = await getCreative(assetId);
+    const approved = d.versions.find((v) => v.version === d.asset.approved_version);
+    if (!approved) return;
+    setC((prev) => ({ ...prev, creative_asset_id: assetId, creative_version: approved.version,
+      headline: approved.headline ?? "", primary_text: approved.primary_text ?? "", description: approved.description ?? prev.description,
+      cta: approved.cta ?? prev.cta }));
+  }
   const togglePlatform = (p: string) => set("platforms", c.platforms.includes(p) ? c.platforms.filter((x) => x !== p) : [...c.platforms, p]);
   return (
     <form className="config-form" onSubmit={(ev) => { ev.preventDefault(); onSubmit({ ...c, daily_budget_minor: Math.round(Number(budget) * 100) }); }}>
@@ -394,9 +411,16 @@ export function ConfigForm({ initial, submitLabel, busy, onSubmit, onCancel }: {
           <label key={p} className="check-line"><input type="checkbox" checked={c.platforms.includes(p)} onChange={() => togglePlatform(p)} />{p.replace("_", " ")}</label>
         ))}
       </fieldset>
-      <label className="form-field"><span>Headline <small>{c.headline.length}/80</small></span><input required maxLength={80} value={c.headline} onChange={(e) => set("headline", e.target.value)} /></label>
+      {clientId && (
+        <label className="form-field"><span>Approved creative <small>locks the copy to the approved version</small></span>
+          <select value={c.creative_asset_id ?? ""} onChange={(e) => void attach(e.target.value)}>
+            <option value="">None (copy not creative-reviewed)</option>
+            {creatives.map((cr) => <option key={cr.id} value={cr.id}>{cr.name} · v{cr.approved_version}</option>)}
+          </select></label>
+      )}
+      <label className="form-field"><span>Headline <small>{c.headline.length}/80</small></span><input required maxLength={80} readOnly={locked} value={c.headline} onChange={(e) => set("headline", e.target.value)} /></label>
       <label className="form-field"><span>Primary text <small>{c.primary_text.length}/1500</small></span>
-        <textarea required maxLength={1500} rows={4} value={c.primary_text} onChange={(e) => set("primary_text", e.target.value)} /></label>
+        <textarea required maxLength={1500} rows={4} readOnly={locked} value={c.primary_text} onChange={(e) => set("primary_text", e.target.value)} /></label>
       <div className="form-grid-2">
         <label className="form-field"><span>Call to action</span>
           <select value={c.cta} onChange={(e) => set("cta", e.target.value)}>
@@ -431,7 +455,7 @@ function NewDraftDrawer({ clientId, onClose, onCreated }: { clientId: string; on
           <button type="button" className="refresh" onClick={onClose}>Close</button></div>
         <div className="drawer-body">
           <ErrorBanner error={error} onDismiss={() => setError(null)} />
-          <ConfigForm initial={BLANK} submitLabel="Save draft" busy={busy} onCancel={onClose} onSubmit={async (config) => {
+          <ConfigForm clientId={clientId} initial={BLANK} submitLabel="Save draft" busy={busy} onCancel={onClose} onSubmit={async (config) => {
             setBusy(true); setError(null);
             try { onCreated((await createExecution(clientId, config, key)).execution.id); }
             catch (err) { setError(errorText(err, "Could not save the draft")); }

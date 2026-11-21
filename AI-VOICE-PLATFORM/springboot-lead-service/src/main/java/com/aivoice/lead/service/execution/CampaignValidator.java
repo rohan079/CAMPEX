@@ -36,7 +36,15 @@ public final class CampaignValidator {
      * @param mappedAdAccounts ad accounts mapped to the client
      * @param dailySpendLimit  the client's daily limit in major currency units, or null when no policy is set
      */
-    public record Context(Set<String> mappedAdAccounts, BigDecimal dailySpendLimit) {
+    public record Context(Set<String> mappedAdAccounts, BigDecimal dailySpendLimit,
+                          java.util.Map<String, ApprovedCreative> approvedCreatives) {
+        public Context(Set<String> mappedAdAccounts, BigDecimal dailySpendLimit) {
+            this(mappedAdAccounts, dailySpendLimit, java.util.Map.of());
+        }
+    }
+
+    /** The approved version of a creative and the copy that was approved with it. */
+    public record ApprovedCreative(int version, String headline, String primaryText) {
     }
 
     private CampaignValidator() {
@@ -114,6 +122,21 @@ public final class CampaignValidator {
             String problem = urlProblem(url);
             if (problem != null) {
                 errors.add(issue("destination_url", "unsafe", problem));
+            }
+        }
+
+        String creativeId = trim(c.creativeAssetId());
+        if (creativeId.isEmpty()) {
+            warnings.add(issue("creative", "none", "No approved creative is attached; the copy has not been through creative review."));
+        } else {
+            ApprovedCreative approved = ctx.approvedCreatives().get(creativeId);
+            if (approved == null) {
+                errors.add(issue("creative", "not_approved", "The attached creative is not approved for this client."));
+            } else if (c.creativeVersion() == null || c.creativeVersion() != approved.version()) {
+                errors.add(issue("creative", "stale_version", "The attached creative version is not the approved one (v"
+                        + approved.version() + "). Re-attach it."));
+            } else if (!trim(approved.headline()).equals(headline) || !trim(approved.primaryText()).equals(text)) {
+                errors.add(issue("creative", "copy_changed", "Headline and primary text must match the approved creative."));
             }
         }
 

@@ -241,6 +241,23 @@ public class VoiceServiceClient {
         }
     }
 
+    /** Calls a Creative Studio route ({@code /api/creative/...}). No Meta token is sent. */
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> creativeCall(String path, Object body) {
+        try {
+            Map<String, Object> response = campaignClient.post().uri(path).body(body).retrieve().body(Map.class);
+            if (response == null) {
+                throw new CampaignAssistException("Creative service returned no data", 502, null);
+            }
+            return response;
+        } catch (HttpStatusCodeException e) {
+            int code = e.getStatusCode().value();
+            throw new CampaignAssistException(errorDetail(e), code == 503 ? 503 : 502, e);
+        } catch (ResourceAccessException e) {
+            throw new CampaignAssistException("Creative service did not respond", 503, e);
+        }
+    }
+
     private static final com.fasterxml.jackson.databind.ObjectMapper ERROR_JSON = new com.fasterxml.jackson.databind.ObjectMapper();
 
     private static String errorDetail(HttpStatusCodeException e) {

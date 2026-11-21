@@ -10,7 +10,7 @@ Phase 3 is delivered in increments. This document is updated with each one; sect
 |---|-----------|--------|
 | 1 | Campaign execution engine: drafts, validation, approval, idempotent PAUSED publish, reconciliation, notifications | **built** |
 | 2 | Campaign Studio → approval flow; Campaign approvals page (history, validation, approvals, actions); notification bell | **built** |
-| 3 | Creative Studio: persistent asset storage, versions, approval, copy variations | planned |
+| 3 | Creative Studio: AI copy with claim checks, artwork generation/upload, persistent storage, versions, review, attach to campaigns | **built** |
 | 4 | Optimization Action Center: Phase 2 recommendation → previewed, approved, verified Meta change | planned |
 | 5 | Automation rules (levels 1–3; level 4 off by default) | planned |
 | 6 | Experiment execution on top of Phase 2 experiments | planned |
@@ -211,6 +211,56 @@ The legacy `POST /api/meta/campaigns/publish` stays for backward compatibility, 
 Campaign Studio's button is now **Send for approval** (create or update the server draft, validate, submit), and
 publishing happens from **Campaign approvals** after a recorded approval and an explicit acknowledgement.
 
+## 6a. Creative Studio (increment 3)
+
+```mermaid
+stateDiagram-v2
+  [*] --> GENERATED: AI artwork
+  [*] --> EDITING: upload
+  GENERATED --> EDITING: edit (new version)
+  EDITING --> REVIEW_PENDING: submit (claims checked)
+  REJECTED --> REVIEW_PENDING: submit
+  REVIEW_PENDING --> APPROVED: approve (version recorded)
+  REVIEW_PENDING --> REJECTED: request changes
+  APPROVED --> EDITING: edit (approved version kept)
+  GENERATED --> ARCHIVED
+  EDITING --> ARCHIVED
+  APPROVED --> ARCHIVED
+```
+
+* **Copy** (`POST /api/clients/{id}/creative/copy`): the brief plus the client's **verified facts** go to the configured
+  LLM (same provider abstraction as Phase 2: OpenAI, Claude or OpenAI-compatible). Output: 5 headlines, 3 primary
+  texts, 3 descriptions, CTA recommendations and 2–3 artwork concepts. English is the default; Telugu, Hindi and
+  Kannada are offered as beta.
+* **Claim check** (deterministic, `fastapi … /api/creative/check`): every number must appear in the verified facts;
+  phrases such as guaranteed/assured returns, "double your money", "risk-free", "best investment", approval or
+  possession claims not present in the facts are flagged. Generation retries once when its first draft fails the
+  check; remaining problems are shown, never hidden.
+* **Approval rules**: flagged phrases block approval; numbers not in the facts require the approver to tick "I verified
+  the flagged figures", which is recorded on the approval.
+* **Artwork** (`POST /api/clients/{id}/creative/generate`): OpenAI Images (`AI_IMAGE_MODEL`); with a reference image
+  the GPT Image edits endpoint is used (DALL·E models refuse reference images with a clear message). The prompt
+  forbids text, numbers, prices, logos and badges in the image, so factual claims live only in reviewable copy.
+  Uploads are accepted as PNG, JPEG or WebP up to 8 MB, checked by magic bytes.
+* **Storage**: image bytes are stored in PostgreSQL (`creative_images`, referenced by immutable `creative_versions`);
+  provider URLs are downloaded immediately and never stored. Served only to client members via
+  `GET /api/creative/images/{id}` with `Cache-Control: no-store`. Moving to object storage later only changes
+  `creative_images`.
+* **Campaign link**: a campaign draft can attach an approved creative (`creative_asset_id`, `creative_version`).
+  Validation then requires that exact approved version and identical headline/primary text, so published copy is
+  always the reviewed copy. Drafts without a creative get a warning.
+
+| Method | Path | Permission |
+|---|---|---|
+| POST | `/api/clients/{clientId}/creative/copy` | MANAGE |
+| POST | `/api/clients/{clientId}/creative/generate` | MANAGE |
+| POST | `/api/clients/{clientId}/creative/assets` (upload) | MANAGE |
+| GET | `/api/clients/{clientId}/creative/assets` | READ |
+| GET | `/api/creative/assets/{id}` | READ |
+| PUT | `/api/creative/assets/{id}` (new version) | MANAGE |
+| POST | `/api/creative/assets/{id}/submit` · `/approve` · `/reject` · `/archive` | MANAGE |
+| GET | `/api/creative/images/{imageId}` | READ |
+
 ## 7. Roles and permissions
 
 Spec roles map onto the existing per-client roles (no schema change needed yet):
@@ -234,9 +284,12 @@ No new environment variables in increment 1. Uses the existing `CAMPEX_PLATFORM_
 
 ## 9. Known limitations and unsupported Meta capabilities
 
-* **Ads are not created yet.** The existing tool creates the campaign and ad set; creating the ad needs an uploaded
-  Meta image hash (`/act_{id}/adimages`) and a creative. That upload flow is planned with the Creative Studio
-  (increment 3) and will be added only after verifying permissions on a real test ad account.
+* **Ads are not created yet.** The campaign and ad set are created paused; creating the ad needs an uploaded Meta
+  image hash (`/act_{id}/adimages`) and an ad creative. Approved creatives are stored and previewed in Campex, but
+  the Meta image upload will be added only after verifying the Graph API flow and permissions on a real test ad
+  account.
+* Creative images live in PostgreSQL. Fine for single-image ads at agency scale; move to object storage before
+  storing video or large volumes.
 * Ad set schedule (start/end time), placements beyond the tool's defaults, special ad categories (housing!) and
   detailed targeting are not configurable yet. **Real-estate advertisers in many regions must declare the housing
   special ad category**; the current tool sends an empty list. Until that is configurable, review the campaign in Ads

@@ -77,10 +77,13 @@ public class CampaignExecutionService {
     private final MetaAccessResolver metaAccess;
     private final MetaExecutionGateway meta;
     private final ObjectMapper json;
+    private final com.aivoice.lead.service.creative.CreativeStudioService creatives;
 
     public CampaignExecutionService(JdbcTemplate jdbc, TransactionTemplate tx, ClientAccessService access,
                                     AuditService audit, NotificationService notifications,
-                                    MetaAccessResolver metaAccess, MetaExecutionGateway meta, ObjectMapper json) {
+                                    MetaAccessResolver metaAccess, MetaExecutionGateway meta, ObjectMapper json,
+                                    com.aivoice.lead.service.creative.CreativeStudioService creatives) {
+        this.creatives = creatives;
         this.jdbc = jdbc;
         this.tx = tx;
         this.access = access;
@@ -464,7 +467,7 @@ public class CampaignExecutionService {
                 "SELECT ad_account_id FROM client_ad_accounts WHERE client_id = ?", String.class, clientId);
         BigDecimal limit = jdbc.queryForList("SELECT daily_spend_limit FROM client_budget_policies WHERE client_id = ?",
                 BigDecimal.class, clientId).stream().findFirst().orElse(null);
-        return new CampaignValidator.Context(Set.copyOf(accounts), limit);
+        return new CampaignValidator.Context(Set.copyOf(accounts), limit, creatives.approvedCreatives(clientId));
     }
 
     private void transition(UUID id, String from, String to, Actor actor, String stepName, Map<String, Object> extra) {
@@ -611,7 +614,7 @@ public class CampaignExecutionService {
                 trim(c.location()), c.ageMin(), c.ageMax(), c.dailyBudgetMinor(), trim(c.headline()),
                 trim(c.primaryText()), trim(c.description()),
                 c.cta() == null ? null : c.cta().trim().toUpperCase(Locale.ROOT).replace(' ', '_'),
-                trim(c.destinationUrl()), trim(c.pageId()));
+                trim(c.destinationUrl()), trim(c.pageId()), trim(c.creativeAssetId()), c.creativeVersion());
     }
 
     String hash(CampaignConfig config) {

@@ -27,7 +27,9 @@ public final class CampaignExecutionDtos {
             @Size(max = 500) String description,
             @Size(max = 40) String cta,
             @Size(max = 2048) String destinationUrl,
-            @Size(max = 64) String pageId) {
+            @Size(max = 64) String pageId,
+            @Size(max = 64) String creativeAssetId,
+            Integer creativeVersion) {
     }
 
     public record ValidationIssue(String field, String code, String message) {
