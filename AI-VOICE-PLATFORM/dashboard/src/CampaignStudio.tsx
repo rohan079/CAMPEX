@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ChangeEvent, FormEvent } from "react";
-import { ApiError, assistCampaign, getMetaConnection, publishMetaCampaign } from "./api";
+import { ApiError, assistCampaign, getMetaConnection } from "./api";
+import { createExecution, submitExecution, updateExecution, validateExecution } from "./executionApi";
+import type { CampaignConfig, ExecutionDetail } from "./executionTypes";
 import type { MetaConnectionStatus } from "./api";
 import type { CampaignPlatform, Client, LanguageCode } from "./types";
 
@@ -86,12 +88,22 @@ function readDrafts(): Draft[] {
   }
 }
 
+/** Studio CTA labels → Meta call-to-action types accepted by the execution engine. */
+const CTA_TYPES: Record<string, string> = {
+  "Learn more": "LEARN_MORE",
+  "Send message": "MESSAGE_PAGE",
+  "Sign up": "SIGN_UP",
+  "Contact us": "CONTACT_US",
+};
+
 export function CampaignStudio({
   client,
   onOpenChannels,
+  onOpenApprovals,
 }: {
   client?: Client;
   onOpenChannels: () => void;
+  onOpenApprovals?: (executionId?: string) => void;
 }) {
   const [drafts, setDrafts] = useState<Draft[]>(readDrafts);
   const [draftId, setDraftId] = useState<string | null>(null);
@@ -119,11 +131,26 @@ export function CampaignStudio({
   const [metaLoading, setMetaLoading] = useState(true);
   const [selectedAdAccountId, setSelectedAdAccountId] = useState("");
   const [selectedPageId, setSelectedPageId] = useState("");
-  const [adsManagerUrl, setAdsManagerUrl] = useState<string | null>(null);
+  const [dailyBudget, setDailyBudget] = useState("500");
+  const [destinationUrl, setDestinationUrl] = useState("");
+  const [submittedId, setSubmittedId] = useState<string | null>(null);
+  // The server-side draft this studio session created; edits update it instead of creating another draft.
+  const [serverDraftId, setServerDraftId] = useState<string | null>(null);
+  const [validationErrors, setValidationErrors] = useState<string[]>([]);
+  // One key per form state, so a double click (or a retry after a network error) cannot create two drafts.
+  const [submitKey, setSubmitKey] = useState(() => crypto.randomUUID());
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(drafts));
   }, [drafts]);
+
+  useEffect(() => {
+    setSubmitKey(crypto.randomUUID());
+    setSubmittedId(null);
+  }, [name, objective, platforms, location, ageMin, ageMax, headline, body, cta, dailyBudget, destinationUrl,
+    selectedAdAccountId, selectedPageId, client?.id]);
+
+  useEffect(() => setServerDraftId(null), [client?.id]);
 
   useEffect(() => {
     let active = true;
@@ -303,6 +330,7 @@ export function CampaignStudio({
 
   function clearDraft() {
     setDraftId(null);
+    setServerDraftId(null);
     setName("");
     setObjective("leads");
     setPlatforms(["facebook", "instagram"]);
@@ -316,57 +344,75 @@ export function CampaignStudio({
     setImage(null);
     setNotice(null);
     setError(null);
-    setAdsManagerUrl(null);
   }
 
-  async function publishCampaign() {
+  /**
+   * Phase 3: the studio no longer publishes directly. It saves the campaign as a server-side draft, validates it and
+   * submits it for approval; publishing happens from Campaign approvals after a recorded approval.
+   */
+  async function sendForApproval() {
     setError(null);
     setNotice(null);
-    setAdsManagerUrl(null);
+    setValidationErrors([]);
+    if (!client) {
+      setError("Choose a client before sending a campaign for approval.");
+      return;
+    }
     if (!canPublish) {
       setError(metaReady
         ? "Publishing currently supports Facebook, Instagram, and WhatsApp Ads only. Deselect other channels."
         : "Connect Meta Business with at least one ad account under Channels first.");
       return;
     }
-    if (!name.trim() || !body.trim() || !headline.trim() || !location.trim()) {
-      setError("Add a campaign name, location, headline, and primary text before publishing.");
+    const budgetMinor = Math.round(Number(dailyBudget) * 100);
+    if (!Number.isFinite(budgetMinor) || budgetMinor < 100) {
+      setError("Enter a daily budget of at least ₹1.");
       return;
     }
-    const nextAgeMin = clampAge(ageMin, AGE_MIN_FLOOR);
-    const nextAgeMax = clampAge(ageMax, AGE_MAX_CEILING);
-    if (nextAgeMax < nextAgeMin) {
-      setError("Maximum age must be greater than or equal to minimum age.");
-      return;
-    }
-    const confirmed = window.confirm(
-      `Create a paused campaign in the selected ad account? Ads will not start delivering until you review and activate them in Ads Manager.`,
-    );
-    if (!confirmed) return;
     setPublishBusy(true);
     try {
-      const result = await publishMetaCampaign({
-        campaign_name: name.trim(),
+      const config: CampaignConfig = {
+        ad_account_id: selectedAdAccountId,
+        name: name.trim(),
         objective,
-        platforms: metaPlatforms as Array<"facebook" | "instagram" | "whatsapp_ads">,
+        platforms: metaPlatforms,
         location: location.trim(),
-        age_min: nextAgeMin,
-        age_max: nextAgeMax,
+        age_min: clampAge(ageMin, AGE_MIN_FLOOR),
+        age_max: clampAge(ageMax, AGE_MAX_CEILING),
+        daily_budget_minor: budgetMinor,
         headline: headline.trim(),
-        body: body.trim(),
-        cta,
-        ad_account_id: selectedAdAccountId || undefined,
-        page_id: selectedPageId || undefined,
-        confirmed: true,
-      });
-      setAdsManagerUrl(result.ads_manager_url);
-      setNotice(
-        result.warning
-          ? `Campaign created as paused. ${result.warning}`
-          : "Campaign created as paused. Review and activate it in Ads Manager when ready.",
-      );
+        primary_text: body.trim(),
+        cta: CTA_TYPES[cta] ?? "LEARN_MORE",
+        destination_url: destinationUrl.trim() || null,
+        page_id: selectedPageId || null,
+      };
+      let created: ExecutionDetail | null = null;
+      if (serverDraftId) {
+        try {
+          created = await updateExecution(serverDraftId, config);
+        } catch (err) {
+          // Already submitted, approved or published: start a new draft instead of changing that one.
+          if (!(err instanceof ApiError && (err.status === 409 || err.status === 404))) throw err;
+        }
+      }
+      created ??= await createExecution(client.id, config, submitKey);
+      const id = created.execution.id;
+      setServerDraftId(id);
+      setSubmittedId(id);
+      if (created.execution.status === "PENDING_APPROVAL") {
+        setNotice("Already sent for approval. Nothing has been published.");
+        return;
+      }
+      const report = await validateExecution(id);
+      if (!report.valid) {
+        setValidationErrors(report.errors.map((issue) => issue.message));
+        setNotice("Saved as a draft in Campex. Fix the issues below, then send it again.");
+        return;
+      }
+      await submitExecution(id);
+      setNotice("Sent for approval. Nothing has been published: an approver publishes it as a paused campaign from Campaign approvals.");
     } catch (err) {
-      setError(err instanceof ApiError || err instanceof Error ? err.message : "Could not publish to Meta");
+      setError(err instanceof ApiError || err instanceof Error ? err.message : "Could not send for approval");
     } finally {
       setPublishBusy(false);
     }
@@ -474,6 +520,16 @@ export function CampaignStudio({
               </div>
             </div>
             <p className="targeting-note">Audience targeting is applied when you publish. New campaigns stay paused until you activate them in Ads Manager.</p>
+            <div className="form-two-col targeting-grid" style={{ marginTop: 12 }}>
+              <label className="form-field">
+                <span>Daily budget (₹)</span>
+                <input type="number" min={1} step={1} value={dailyBudget} onChange={(event) => setDailyBudget(event.target.value)} />
+              </label>
+              <label className="form-field">
+                <span>Destination URL <small>required for traffic and sales</small></span>
+                <input type="url" placeholder="https://" value={destinationUrl} onChange={(event) => setDestinationUrl(event.target.value)} />
+              </label>
+            </div>
             {metaReady && (
               <div className="form-two-col targeting-grid" style={{ marginTop: 12 }}>
                 <label className="form-field">
@@ -573,9 +629,14 @@ export function CampaignStudio({
 
           {error && <p className="notice error" role="alert">{error}</p>}
           {notice && <p className="notice success" role="status">{notice}</p>}
-          {adsManagerUrl && (
+          {validationErrors.length > 0 && (
+            <ul className="notice error validation-list" role="alert">
+              {validationErrors.map((message) => <li key={message}>{message}</li>)}
+            </ul>
+          )}
+          {submittedId && onOpenApprovals && (
             <p className="notice success" role="status">
-              <a href={adsManagerUrl} target="_blank" rel="noreferrer">Open campaign in Meta Ads Manager</a>
+              <button type="button" className="text-button" onClick={() => onOpenApprovals(submittedId)}>Open in Campaign approvals →</button>
             </p>
           )}
           <div className="campaign-actions">
@@ -585,13 +646,11 @@ export function CampaignStudio({
               type="button"
               className="primary-button"
               disabled={publishBusy || metaLoading || !canPublish}
-              title={canPublish ? "Create a paused Meta campaign" : "Connect Meta Business with an ad account, and select only Meta channels"}
-              onClick={() => void publishCampaign()}
+              title={canPublish ? "Save in Campex and request approval" : "Connect Meta Business with an ad account, and select only Meta channels"}
+              onClick={() => void sendForApproval()}
             >
-              {publishBusy
-                ? "Publishing to Meta…"
-                : `Create paused Meta campaign`}
-              {!publishBusy && <span>↗</span>}
+              {publishBusy ? "Sending…" : "Send for approval"}
+              {!publishBusy && <span>→</span>}
             </button>
           </div>
           <div className="publish-note">
@@ -604,7 +663,7 @@ export function CampaignStudio({
                 {" "}
                 {unsupportedSelected
                   ? "Deselect Google Ads or WhatsApp Business messaging to enable Publish (Meta channels only)."
-                  : "Confirm to create a paused campaign you can review in Ads Manager before activating."}
+                  : "An approver publishes it as a paused campaign. Nothing reaches Meta without a recorded approval."}
               </p>
             ) : (
               <p><strong>Meta Business is not connected.</strong> Connect an ad account under Channels before you publish.</p>

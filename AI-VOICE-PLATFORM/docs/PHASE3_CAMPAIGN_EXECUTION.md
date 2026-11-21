@@ -9,7 +9,7 @@ Phase 3 is delivered in increments. This document is updated with each one; sect
 | # | Increment | Status |
 |---|-----------|--------|
 | 1 | Campaign execution engine: drafts, validation, approval, idempotent PAUSED publish, reconciliation, notifications | **built** |
-| 2 | Campaign Studio + Approval Center + Execution History + Notification Center in React | planned |
+| 2 | Campaign Studio → approval flow; Campaign approvals page (history, validation, approvals, actions); notification bell | **built** |
 | 3 | Creative Studio: persistent asset storage, versions, approval, copy variations | planned |
 | 4 | Optimization Action Center: Phase 2 recommendation → previewed, approved, verified Meta change | planned |
 | 5 | Automation rules (levels 1–3; level 4 off by default) | planned |
@@ -207,8 +207,9 @@ Internal FastAPI additions (service-key protected, read-only): `POST /api/meta/c
 name fragment in one ad account) and `POST /api/meta/campaigns/status` (current status/effective status of one
 campaign). The existing `POST /api/meta/publish` is reused for creation.
 
-The legacy `POST /api/meta/campaigns/publish` stays for backward compatibility; Campaign Studio moves to the
-execution flow in increment 2.
+The legacy `POST /api/meta/campaigns/publish` stays for backward compatibility, but the dashboard no longer calls it:
+Campaign Studio's button is now **Send for approval** (create or update the server draft, validate, submit), and
+publishing happens from **Campaign approvals** after a recorded approval and an explicit acknowledgement.
 
 ## 7. Roles and permissions
 
