@@ -218,6 +218,64 @@ public class VoiceServiceClient {
         }
     }
 
+    /**
+     * Calls an internal FastAPI Meta route ({@code /api/meta/...}) with the stored token in a header. Errors carry
+     * FastAPI's sanitized detail (Meta tool messages never include tokens) so the execution engine can show why
+     * Meta refused; transport failures are reported as {@code mcp_transport_failure}.
+     */
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> metaExecutionCall(String path, Object body, String metaAccessToken) {
+        try {
+            Map<String, Object> response = campaignClient.post().uri(path)
+                    .header("X-Meta-Access-Token", metaAccessToken)
+                    .body(body)
+                    .retrieve().body(Map.class);
+            if (response == null) {
+                throw new MetaGraphException(502, -1, "mcp_empty_response", "Meta tool returned no data");
+            }
+            return response;
+        } catch (HttpStatusCodeException e) {
+            throw new MetaGraphException(e.getStatusCode().value(), -1, "mcp_http_response", errorDetail(e));
+        } catch (ResourceAccessException e) {
+            throw new MetaGraphException(502, -1, "mcp_transport_failure", "Meta MCP service did not respond");
+        }
+    }
+
+    /** Calls a Creative Studio route ({@code /api/creative/...}). No Meta token is sent. */
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> creativeCall(String path, Object body) {
+        try {
+            Map<String, Object> response = campaignClient.post().uri(path).body(body).retrieve().body(Map.class);
+            if (response == null) {
+                throw new CampaignAssistException("Creative service returned no data", 502, null);
+            }
+            return response;
+        } catch (HttpStatusCodeException e) {
+            int code = e.getStatusCode().value();
+            throw new CampaignAssistException(errorDetail(e), code == 503 ? 503 : 502, e);
+        } catch (ResourceAccessException e) {
+            throw new CampaignAssistException("Creative service did not respond", 503, e);
+        }
+    }
+
+    private static final com.fasterxml.jackson.databind.ObjectMapper ERROR_JSON = new com.fasterxml.jackson.databind.ObjectMapper();
+
+    private static String errorDetail(HttpStatusCodeException e) {
+        String detail = null;
+        try {
+            com.fasterxml.jackson.databind.JsonNode node = ERROR_JSON.readTree(e.getResponseBodyAsString());
+            if (node != null && node.path("detail").isTextual()) {
+                detail = node.path("detail").asText();
+            }
+        } catch (java.io.IOException | RuntimeException ignored) {
+            // Non-JSON error body: fall back to the status line below.
+        }
+        if (detail == null || detail.isBlank()) {
+            return "Meta request failed (HTTP " + e.getStatusCode().value() + ")";
+        }
+        return detail.length() > 500 ? detail.substring(0, 500) : detail;
+    }
+
     private static String describe(HttpStatusCode status) {
         return "HTTP " + status.value();
     }

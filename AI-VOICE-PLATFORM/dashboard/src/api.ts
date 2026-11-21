@@ -81,6 +81,19 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+/** Authenticated binary GET (e.g. stored creative images, which need the Firebase token). */
+export async function requestBlob(path: string): Promise<Blob> {
+  const headers = await authHeaders();
+  let response: Response;
+  try {
+    response = await fetch(path, { headers, credentials: "same-origin" });
+  } catch {
+    throw new Error("Cannot reach Campex right now. Refresh and try again.");
+  }
+  if (!response.ok) throw new ApiError(publicErrorMessage(response.status), response.status);
+  return response.blob();
+}
+
 export interface MetaPage {
   id: string;
   name: string;

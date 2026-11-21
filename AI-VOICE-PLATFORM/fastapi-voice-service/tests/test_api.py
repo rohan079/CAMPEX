@@ -274,3 +274,90 @@ def test_voice_webhook_needs_its_own_secret_and_ignores_unknown_sessions(client)
     other = client.post("/webhooks/voice/events", json={"session_id": "zzz", "type": "session.closed"},
                         headers={"X-Webhook-Secret": "hook"})
     assert other.json()["known_session"] is False
+
+
+def _read_only_test_mcp(seen):
+    from fastmcp import FastMCP
+
+    test_mcp = FastMCP("test Meta read tools")
+
+    @test_mcp.tool
+    async def find_campaigns_by_name(ad_account_id: str, name_contains: str, access_token: str, limit: int = 25) -> list[dict]:
+        seen["token"] = access_token
+        seen["fragment"] = name_contains
+        return [{"id": "111", "name": f"Villas [{name_contains}]", "status": "PAUSED", "effective_status": "PAUSED"}]
+
+    @test_mcp.tool
+    async def get_ad_sets(ad_account_id: str, access_token: str, campaign_id: str = "", limit: int = 50) -> list[dict]:
+        return [{"id": "222", "campaign_id": campaign_id}]
+
+    @test_mcp.tool
+    async def get_campaign_details(campaign_id: str, access_token: str) -> dict:
+        return {"id": campaign_id, "name": "Villas", "status": "PAUSED", "effective_status": "CAMPAIGN_PAUSED"}
+
+    return test_mcp
+
+
+def test_campaign_lookup_returns_ids_and_never_the_token(client):
+    seen = {}
+    app.state.meta_ads_mcp = _read_only_test_mcp(seen)
+    response = client.post(
+        "/api/meta/campaigns/lookup",
+        json={"ad_account_id": "act_123", "name_contains": "cx-abc123def0"},
+        headers={**KEY, "X-Meta-Access-Token": "private-token"},
+    )
+    assert response.status_code == 200
+    assert response.json() == {"campaigns": [{"id": "111", "name": "Villas [cx-abc123def0]", "status": "PAUSED",
+                                              "effective_status": "PAUSED", "adset_ids": ["222"]}]}
+    assert "private-token" not in response.text
+    assert seen == {"token": "private-token", "fragment": "cx-abc123def0"}
+
+
+def test_campaign_status_and_lookup_require_service_key_and_token(client):
+    app.state.meta_ads_mcp = _read_only_test_mcp({})
+    body = {"ad_account_id": "act_123", "campaign_id": "111"}
+    assert client.post("/api/meta/campaigns/status", json=body, headers={"X-Meta-Access-Token": "t"}).status_code == 401
+    assert client.post("/api/meta/campaigns/status", json=body, headers=KEY).status_code == 401
+    response = client.post("/api/meta/campaigns/status", json=body, headers={**KEY, "X-Meta-Access-Token": "t"})
+    assert response.status_code == 200
+    assert response.json()["effective_status"] == "CAMPAIGN_PAUSED"
+
+
+def test_object_apply_requires_confirmation_service_key_and_token(client):
+    from fastmcp import FastMCP
+
+    seen = {}
+    test_mcp = FastMCP("apply")
+
+    @test_mcp.tool
+    async def apply_object_change(level: str, object_id: str, access_token: str, confirmed: bool,
+                                  status: str | None = None, daily_budget_minor: int | None = None) -> dict:
+        seen.update(level=level, status=status, budget=daily_budget_minor, token=access_token)
+        return {"object_id": object_id, "applied": {"status": status}, "success": True}
+
+    app.state.meta_ads_mcp = test_mcp
+    body = {"level": "ad", "object_id": "9001", "status": "PAUSED", "confirmed": True}
+    assert client.post("/api/meta/objects/apply", json=body, headers={"X-Meta-Access-Token": "t"}).status_code == 401
+    assert client.post("/api/meta/objects/apply", json={**body, "confirmed": False},
+                       headers={**KEY, "X-Meta-Access-Token": "t"}).status_code == 400
+    response = client.post("/api/meta/objects/apply", json=body, headers={**KEY, "X-Meta-Access-Token": "private"})
+    assert response.status_code == 200
+    assert "private" not in response.text
+    assert seen == {"level": "ad", "status": "PAUSED", "budget": None, "token": "private"}
+
+
+def test_campaign_statuses_are_read_only_and_token_free(client):
+    from fastmcp import FastMCP
+
+    test_mcp = FastMCP("statuses")
+
+    @test_mcp.tool
+    async def get_campaigns(ad_account_id: str, access_token: str, limit: int = 50, status_filter: str = "") -> list[dict]:
+        return [{"id": "1", "name": "Villas", "status": "ACTIVE", "effective_status": "WITH_ISSUES", "daily_budget": "35000"}]
+
+    app.state.meta_ads_mcp = test_mcp
+    response = client.post("/api/meta/campaigns/statuses", json={"ad_account_id": "act_1"},
+                           headers={**KEY, "X-Meta-Access-Token": "secret-token"})
+    assert response.status_code == 200
+    assert response.json() == {"campaigns": [{"id": "1", "name": "Villas", "status": "ACTIVE", "effective_status": "WITH_ISSUES"}]}
+    assert "secret-token" not in response.text

@@ -6,6 +6,7 @@ import { labelize } from "./measurementFormat";
 import { ErrorBanner, SourceBadge, errorText } from "./measurementUi";
 import { DataNotes } from "./PerformanceIntelligencePage";
 import { actorName } from "./privacy";
+import { previewAction } from "./actionApi";
 
 function evidenceValue(e: Evidence) {
   if (e.value === null) return "unavailable";
@@ -30,6 +31,16 @@ export function RecommendationsPanel({ clientId, from, to }: { clientId: string;
     }
   }, [clientId, status]);
   useEffect(() => { void load(); }, [load]);
+
+  async function prepare(rec: Recommendation) {
+    setError(null);
+    try {
+      await previewAction(clientId, { recommendation_id: rec.id });
+      setNote("Change prepared from Meta's current state. Approve and apply it in Optimization actions.");
+    } catch (err) {
+      setError(errorText(err, "Could not prepare the change"));
+    }
+  }
 
   async function generate() {
     setBusy(true);
@@ -69,13 +80,15 @@ export function RecommendationsPanel({ clientId, from, to }: { clientId: string;
       {note && <p className="notice success-notice" role="status">{note}</p>}
       <DataNotes notes={notes} />
       {items.length === 0 ? <p className="empty-state">No recommendations with this status.</p> : (
-        <div className="rec-grid">{items.map((r) => <RecommendationCard key={r.id} rec={r} onDecide={decide} />)}</div>
+        <div className="rec-grid">{items.map((r) => <RecommendationCard key={r.id} rec={r} onDecide={decide} onPrepare={prepare} />)}</div>
       )}
     </>
   );
 }
 
-export function RecommendationCard({ rec, onDecide }: { rec: Recommendation; onDecide: (r: Recommendation, s: "accepted" | "rejected" | "reviewed") => void }) {
+const PREPARABLE = new Set(["increase_budget", "reduce_budget", "pause_for_review"]);
+
+export function RecommendationCard({ rec, onDecide, onPrepare }: { rec: Recommendation; onDecide: (r: Recommendation, s: "accepted" | "rejected" | "reviewed") => void; onPrepare?: (r: Recommendation) => void }) {
   const [showEvidence, setShowEvidence] = useState(false);
   const open = rec.status === "pending" || rec.status === "reviewed";
   return (
@@ -99,8 +112,11 @@ export function RecommendationCard({ rec, onDecide }: { rec: Recommendation; onD
           <button type="button" className="secondary-button" onClick={() => onDecide(rec, "rejected")}>Reject</button>
           {rec.status === "pending" && <button type="button" className="secondary-button" onClick={() => onDecide(rec, "reviewed")}>Mark reviewed</button>}
         </>}
+        {onPrepare && PREPARABLE.has(rec.recommendation_type) && rec.campaign_id && ["pending", "accepted"].includes(rec.status) && (
+          <button type="button" className="secondary-button" onClick={() => onPrepare(rec)}>Prepare change in Meta</button>
+        )}
       </div>
-      {open && rec.category === "budget" && <p className="helper-text">Accepting records your decision only. Budgets are changed in Ads Manager, never automatically.</p>}
+      {open && rec.category === "budget" && <p className="helper-text">Accepting records your decision only. “Prepare change” creates a reviewed change: it needs approval, is applied by Campex once and is verified in Meta. Nothing changes automatically.</p>}
       {showEvidence && (
         <table className="evidence-table"><tbody>{rec.evidence.map((e, i) => (
           <tr key={i}><td>{e.label}</td><td className="num">{evidenceValue(e)}</td><td><SourceBadge source={e.source} /></td></tr>

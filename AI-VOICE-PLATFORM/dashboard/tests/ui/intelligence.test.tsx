@@ -17,6 +17,9 @@ vi.mock("../../src/intelligenceApi", async () => ({
   listAnomalies: vi.fn(), detectAnomalies: vi.fn(), updateAnomaly: vi.fn(), explainAnomaly: vi.fn(), listExperiments: vi.fn(),
   getExperiment: vi.fn(), createExperiment: vi.fn(), startExperiment: vi.fn(), completeExperiment: vi.fn(),
 }));
+vi.mock("../../src/experimentExecutionApi", () => ({ getExperimentExecution: vi.fn(), launchExperiment: vi.fn(), followUpExperiment: vi.fn(), linkVariantCreative: vi.fn() }));
+vi.mock("../../src/creativeApi", () => ({ listCreatives: vi.fn(async () => []) }));
+vi.mock("../../src/actionApi", () => ({ previewAction: vi.fn(async () => ({ id: "act1" })) }));
 const m = vi.mocked(api);
 
 function row(over: Partial<PerfRow> = {}): PerfRow {
@@ -86,13 +89,23 @@ describe("Recommendation cards", () => {
     const card = await screen.findByRole("article", { name: rec.title });
     expect(within(card).getByText(/Expected impact \(estimate\)/)).toBeTruthy();
     expect(within(card).getByText("Confidence: medium")).toBeTruthy();
-    expect(within(card).getByText(/Budgets are changed in Ads Manager/)).toBeTruthy();
+    expect(within(card).getByText(/Nothing changes automatically/)).toBeTruthy();
     fireEvent.click(within(card).getByRole("button", { name: "View evidence" }));
     expect(within(card).getByText("CRM-verified")).toBeTruthy();
     expect(within(card).getByText("INR 1,500")).toBeTruthy();
     fireEvent.click(within(card).getByRole("button", { name: "Accept" }));
     await waitFor(() => expect(m.updateRecommendation).toHaveBeenCalledWith("r1", "accepted"));
     expect(await screen.findByText(/Nothing was changed in Meta/)).toBeTruthy();
+  });
+
+  it("prepares a reviewed Meta change from a budget recommendation", async () => {
+    const actions = await import("../../src/actionApi");
+    m.listRecommendations.mockResolvedValue([rec]);
+    render(<RecommendationsPanel clientId="c1" from="2026-10-23" to="2026-11-19" />);
+    const card = await screen.findByRole("article", { name: rec.title });
+    fireEvent.click(within(card).getByRole("button", { name: "Prepare change in Meta" }));
+    await waitFor(() => expect(actions.previewAction).toHaveBeenCalledWith("c1", { recommendation_id: "r1" }));
+    expect(await screen.findByText(/Approve and apply it in Optimization actions/)).toBeTruthy();
   });
 
   it("generates recommendations for the selected period", async () => {

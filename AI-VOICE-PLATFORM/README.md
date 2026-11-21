@@ -134,6 +134,13 @@ guardrails, creative and audience intelligence, anomaly detection and A/B experi
 from OpenAI, Claude or an OpenAI-compatible model. Read-only towards Meta. Details:
 **[docs/PHASE2_PERFORMANCE_INTELLIGENCE.md](docs/PHASE2_PERFORMANCE_INTELLIGENCE.md)**.
 
+## Phase 3: campaign execution (in progress)
+
+AI prepares, a person approves, Spring executes, Campex records. Increment 1 adds server-side campaign drafts with
+versioned configurations, validation, approvals bound to the exact configuration, idempotent PAUSED publishing with
+reconciliation of timed-out requests, an execution history and in-app notifications. Gap analysis, architecture,
+API and limitations: **[docs/PHASE3_CAMPAIGN_EXECUTION.md](docs/PHASE3_CAMPAIGN_EXECUTION.md)**.
+
 ## Clients, sales and reach (the marketing dashboard)
 
 The React dashboard is organized into **Campaign studio**, **Performance**, **Lead review**, **Channels**, and

@@ -221,3 +221,60 @@ async def test_ad_performance_reports_exact_name_misses():
     data = tool_payload(result)
     assert data["status"] == "not_found"
     assert "exact name" in data["message"]
+
+
+@pytest.mark.asyncio
+async def test_find_campaigns_by_name_filters_server_side_and_exactly():
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["path"] = request.url.path
+        seen["filtering"] = request.url.params.get("filtering")
+        seen["method"] = request.method
+        return httpx.Response(200, json={"data": [
+            {"id": "1", "name": "Villas [cx-abc123def0]", "status": "PAUSED"},
+            {"id": "2", "name": "Villas [CX-ABC123DEF0]", "status": "PAUSED"},
+        ]})
+
+    server = create_meta_ads_mcp(Settings(meta_graph_api_version="v27.0"), httpx.MockTransport(handler))
+    async with Client(server) as client:
+        result = await client.call_tool("find_campaigns_by_name", {
+            "ad_account_id": "act_123", "name_contains": "cx-abc123def0", "access_token": "t"})
+
+    assert seen["method"] == "GET"
+    assert seen["path"].endswith("/act_123/campaigns")
+    assert '"operator": "CONTAIN"' in seen["filtering"]
+    assert [row["id"] for row in tool_payload(result)] == ["1"]
+
+
+@pytest.mark.asyncio
+async def test_apply_object_change_sends_only_the_changed_fields():
+    seen = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append((request.method, request.url.path, dict(httpx.QueryParams(request.content.decode()))))
+        return httpx.Response(200, json={"success": True})
+
+    server = create_meta_ads_mcp(Settings(meta_graph_api_version="v27.0"), httpx.MockTransport(handler))
+    async with Client(server) as client:
+        await client.call_tool("apply_object_change", {"level": "adset", "object_id": "123", "access_token": "t",
+                                                       "confirmed": True, "daily_budget_minor": 38500})
+        await client.call_tool("update_ad_set", {"adset_id": "123", "access_token": "t", "confirmed": True,
+                                                 "daily_budget_minor": 40000})
+        with pytest.raises(ToolError):
+            await client.call_tool("apply_object_change", {"level": "ad", "object_id": "9", "access_token": "t",
+                                                           "confirmed": True, "daily_budget_minor": 500})
+        with pytest.raises(ToolError):
+            await client.call_tool("apply_object_change", {"level": "ad", "object_id": "9", "access_token": "t",
+                                                           "confirmed": False, "status": "PAUSED"})
+
+    # Budget-only changes never touch status (update_ad_set used to send status=PAUSED by default).
+    assert seen[0][2] == {"daily_budget": "38500"}
+    assert seen[1][2] == {"daily_budget": "40000"}
+    assert len(seen) == 2
+
+
+def test_write_tools_stay_out_of_the_ai_allowlist():
+    from services.campaign_assistant import READ_ONLY_META_TOOLS
+
+    assert "apply_object_change" not in READ_ONLY_META_TOOLS
