@@ -55,6 +55,23 @@ public class McpMetaExecutionGateway implements MetaExecutionGateway {
         return new CampaignState(text(r.get("status")), text(r.get("effective_status")));
     }
 
+    @Override
+    public Map<String, Object> objectState(String accessToken, String level, String objectId) {
+        return call("/api/meta/objects/state", Map.of("level", level, "object_id", objectId), accessToken);
+    }
+
+    @Override
+    public Map<String, Object> applyChange(String accessToken, String level, String objectId, String status,
+                                           Long dailyBudgetMinor) {
+        Map<String, Object> body = new java.util.LinkedHashMap<>();
+        body.put("level", level);
+        body.put("object_id", objectId);
+        body.put("confirmed", true);
+        if (status != null) body.put("status", status);
+        if (dailyBudgetMinor != null) body.put("daily_budget_minor", dailyBudgetMinor);
+        return call("/api/meta/objects/apply", body, accessToken);
+    }
+
     private Map<String, Object> call(String path, Object body, String token) {
         try {
             return voice.metaExecutionCall(path, body, token);

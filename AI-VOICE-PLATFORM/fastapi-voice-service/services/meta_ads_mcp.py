@@ -355,14 +355,18 @@ def create_meta_ads_mcp(
         access_token: str,
         confirmed: bool,
         name: str = "",
-        status: Literal["PAUSED", "ACTIVE", "ARCHIVED"] = "PAUSED",
+        status: Literal["PAUSED", "ACTIVE", "ARCHIVED"] | None = None,
     ) -> dict[str, Any]:
-        """Update campaign name or status. Requires explicit confirmation."""
+        """Update campaign name and/or status. Only the fields given are sent. Requires explicit confirmation."""
         if not confirmed:
             raise MetaAdsToolError("Explicit user confirmation is required before updating a campaign.")
-        form = {"status": status}
+        form: dict[str, str] = {}
+        if status:
+            form["status"] = status
         if name.strip():
             form["name"] = name.strip()
+        if not form:
+            raise MetaAdsToolError("Nothing to update.")
         response = await graph.request("POST", graph.object_id(campaign_id), access_token, form=form)
         return {"campaign_id": campaign_id, "status": status, "success": response.get("success", True)}
 
@@ -832,17 +836,21 @@ def create_meta_ads_mcp(
         adset_id: str,
         access_token: str,
         confirmed: bool,
-        status: Literal["PAUSED", "ACTIVE", "ARCHIVED"] = "PAUSED",
+        status: Literal["PAUSED", "ACTIVE", "ARCHIVED"] | None = None,
         daily_budget_minor: int | None = None,
     ) -> dict[str, Any]:
-        """Update ad-set status or daily budget. Requires explicit user confirmation."""
+        """Update ad-set status and/or daily budget; only the fields given are sent. Requires user confirmation."""
         if not confirmed:
             raise MetaAdsToolError("Explicit user confirmation is required before updating an ad set.")
-        form = {"status": status}
+        form: dict[str, str] = {}
+        if status:
+            form["status"] = status
         if daily_budget_minor is not None:
             if daily_budget_minor < 100:
                 raise MetaAdsToolError("Daily budget must be at least 100 minor currency units.")
             form["daily_budget"] = str(daily_budget_minor)
+        if not form:
+            raise MetaAdsToolError("Nothing to update.")
         response = await graph.request("POST", graph.object_id(adset_id), access_token, form=form)
         return {"adset_id": adset_id, "status": status, "success": response.get("success", True)}
 
@@ -952,6 +960,45 @@ def create_meta_ads_mcp(
             form={"name": name.strip(), "object_story_spec": json.dumps(story)},
         )
         return {"creative_id": response.get("id"), "name": name.strip()}
+
+    STATE_FIELDS = {
+        "campaign": "id,name,account_id,status,effective_status,daily_budget,lifetime_budget",
+        "adset": "id,name,account_id,campaign_id,status,effective_status,daily_budget,lifetime_budget",
+        "ad": "id,name,account_id,campaign_id,adset_id,status,effective_status",
+    }
+
+    @mcp.tool
+    async def get_object_state(level: Literal["campaign", "adset", "ad"], object_id: str, access_token: str) -> dict[str, Any]:
+        """Read-only: status and budget of one campaign, ad set or ad (used for before/after verification)."""
+        return await graph.request("GET", graph.object_id(object_id), access_token,
+                                   params={"fields": STATE_FIELDS[level]})
+
+    @mcp.tool
+    async def apply_object_change(
+        level: Literal["campaign", "adset", "ad"],
+        object_id: str,
+        access_token: str,
+        confirmed: bool,
+        status: Literal["PAUSED", "ACTIVE"] | None = None,
+        daily_budget_minor: int | None = None,
+    ) -> dict[str, Any]:
+        """Apply one approved change: status and/or daily budget. Sends only the given fields; never creates or deletes.
+        Only the Campex execution engine calls this, after a recorded human approval."""
+        if not confirmed:
+            raise MetaAdsToolError("Explicit user confirmation is required before changing a live object.")
+        form: dict[str, str] = {}
+        if status:
+            form["status"] = status
+        if daily_budget_minor is not None:
+            if level == "ad":
+                raise MetaAdsToolError("Ads have no budget; change the ad set or campaign budget.")
+            if daily_budget_minor < 100:
+                raise MetaAdsToolError("Daily budget must be at least 100 minor currency units.")
+            form["daily_budget"] = str(daily_budget_minor)
+        if not form:
+            raise MetaAdsToolError("Nothing to change.")
+        response = await graph.request("POST", graph.object_id(object_id), access_token, form=form)
+        return {"object_id": object_id, "applied": form, "success": bool(response.get("success", True))}
 
     @mcp.tool
     async def delete_campaign(campaign_id: str, access_token: str, confirmed: bool) -> dict[str, Any]:

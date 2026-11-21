@@ -321,3 +321,26 @@ def test_campaign_status_and_lookup_require_service_key_and_token(client):
     response = client.post("/api/meta/campaigns/status", json=body, headers={**KEY, "X-Meta-Access-Token": "t"})
     assert response.status_code == 200
     assert response.json()["effective_status"] == "CAMPAIGN_PAUSED"
+
+
+def test_object_apply_requires_confirmation_service_key_and_token(client):
+    from fastmcp import FastMCP
+
+    seen = {}
+    test_mcp = FastMCP("apply")
+
+    @test_mcp.tool
+    async def apply_object_change(level: str, object_id: str, access_token: str, confirmed: bool,
+                                  status: str | None = None, daily_budget_minor: int | None = None) -> dict:
+        seen.update(level=level, status=status, budget=daily_budget_minor, token=access_token)
+        return {"object_id": object_id, "applied": {"status": status}, "success": True}
+
+    app.state.meta_ads_mcp = test_mcp
+    body = {"level": "ad", "object_id": "9001", "status": "PAUSED", "confirmed": True}
+    assert client.post("/api/meta/objects/apply", json=body, headers={"X-Meta-Access-Token": "t"}).status_code == 401
+    assert client.post("/api/meta/objects/apply", json={**body, "confirmed": False},
+                       headers={**KEY, "X-Meta-Access-Token": "t"}).status_code == 400
+    response = client.post("/api/meta/objects/apply", json=body, headers={**KEY, "X-Meta-Access-Token": "private"})
+    assert response.status_code == 200
+    assert "private" not in response.text
+    assert seen == {"level": "ad", "status": "PAUSED", "budget": None, "token": "private"}

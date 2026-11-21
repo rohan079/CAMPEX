@@ -29,6 +29,13 @@ public interface MetaExecutionGateway {
 
     CampaignState status(String accessToken, String adAccountId, String campaignId);
 
+    /** Read-only state of a campaign, ad set or ad: id, name, account_id, status, effective_status, budgets. */
+    java.util.Map<String, Object> objectState(String accessToken, String level, String objectId);
+
+    /** Applies one approved status and/or daily budget change. Idempotent: it sets values, it does not add to them. */
+    java.util.Map<String, Object> applyChange(String accessToken, String level, String objectId, String status,
+                                             Long dailyBudgetMinor);
+
     class GatewayException extends RuntimeException {
         public GatewayException(String message, Throwable cause) {
             super(message, cause);

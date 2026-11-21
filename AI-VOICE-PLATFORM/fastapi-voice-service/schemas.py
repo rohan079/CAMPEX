@@ -130,6 +130,17 @@ class MetaCampaignStatusRequest(BaseModel):
     campaign_id: str = Field(min_length=1, max_length=64, pattern=r"^[0-9]+$")
 
 
+class MetaObjectStateRequest(BaseModel):
+    level: Literal["campaign", "adset", "ad"]
+    object_id: str = Field(min_length=1, max_length=32, pattern=r"^[0-9]+$")
+
+
+class MetaObjectApplyRequest(MetaObjectStateRequest):
+    status: Literal["PAUSED", "ACTIVE"] | None = None
+    daily_budget_minor: int | None = Field(default=None, ge=100)
+    confirmed: bool
+
+
 class ProviderEvent(BaseModel):
     """A status callback from a SIP gateway or provider, in the same vocabulary as OpenAI's sideband events."""
 

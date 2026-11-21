@@ -1644,3 +1644,11 @@ input[readonly], textarea[readonly] { background: var(--surface-2); color: var(-
   .creative-library { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
   .creative-create .segmented-tabs { width: 100%; }
 }
+
+/* ---------------------------------------------------------------- Phase 3: optimization actions */
+.compare-table td, .compare-table th { white-space: nowrap; }
+.compare-table tr.changed td { background: var(--brand-50); }
+.compare-table tr.changed td:first-child { box-shadow: inset 3px 0 var(--brand); font-weight: 600; }
+.guardrail-list { margin: 0; padding: 10px 14px 10px 30px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-2); font-size: .84rem; }
+.guardrail-list li { margin: 3px 0; }
+.exec-actions .check-line { margin: 0; flex: 1 1 100%; }

@@ -4,7 +4,13 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from fastmcp.exceptions import FastMCPError, ToolError
 
 from dependencies import require_service_key
-from schemas import MetaCampaignLookupRequest, MetaCampaignPublishRequest, MetaCampaignStatusRequest
+from schemas import (
+    MetaCampaignLookupRequest,
+    MetaCampaignPublishRequest,
+    MetaCampaignStatusRequest,
+    MetaObjectApplyRequest,
+    MetaObjectStateRequest,
+)
 
 router = APIRouter(prefix="/api/meta", tags=["Meta Ads"], dependencies=[Depends(require_service_key)])
 
@@ -140,3 +146,40 @@ async def campaign_status(
         "status": data.get("status"),
         "effective_status": data.get("effective_status"),
     }
+
+
+def _state(data: dict) -> dict:
+    keys = ("id", "name", "account_id", "campaign_id", "adset_id", "status", "effective_status", "daily_budget", "lifetime_budget")
+    return {k: data.get(k) for k in keys if k in data}
+
+
+@router.post("/objects/state")
+async def object_state(
+    body: MetaObjectStateRequest,
+    request: Request,
+    access_token: str | None = Header(default=None, alias="X-Meta-Access-Token"),
+) -> dict:
+    """Read-only before/after state for the execution engine."""
+    if not access_token:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Connect Meta Business first")
+    return _state(_tool_data(await _call(request, "get_object_state", {
+        "level": body.level, "object_id": body.object_id, "access_token": access_token})))
+
+
+@router.post("/objects/apply")
+async def apply_object_change(
+    body: MetaObjectApplyRequest,
+    request: Request,
+    access_token: str | None = Header(default=None, alias="X-Meta-Access-Token"),
+) -> dict:
+    """Applies one change that Spring has already approved. Service-key only; never reachable from AI tools."""
+    if not body.confirmed:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Approved change must be confirmed")
+    if not access_token:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Connect Meta Business first")
+    arguments = {"level": body.level, "object_id": body.object_id, "access_token": access_token, "confirmed": True}
+    if body.status:
+        arguments["status"] = body.status
+    if body.daily_budget_minor is not None:
+        arguments["daily_budget_minor"] = body.daily_budget_minor
+    return _tool_data(await _call(request, "apply_object_change", arguments))

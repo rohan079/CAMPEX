@@ -11,7 +11,7 @@ Phase 3 is delivered in increments. This document is updated with each one; sect
 | 1 | Campaign execution engine: drafts, validation, approval, idempotent PAUSED publish, reconciliation, notifications | **built** |
 | 2 | Campaign Studio → approval flow; Campaign approvals page (history, validation, approvals, actions); notification bell | **built** |
 | 3 | Creative Studio: AI copy with claim checks, artwork generation/upload, persistent storage, versions, review, attach to campaigns | **built** |
-| 4 | Optimization Action Center: Phase 2 recommendation → previewed, approved, verified Meta change | planned |
+| 4 | Optimization actions: pause / resume / daily budget, previewed from Meta, approved, applied once, verified | **built** |
 | 5 | Automation rules (levels 1–3; level 4 off by default) | planned |
 | 6 | Experiment execution on top of Phase 2 experiments | planned |
 
@@ -261,6 +261,58 @@ stateDiagram-v2
 | POST | `/api/creative/assets/{id}/submit` · `/approve` · `/reject` · `/archive` | MANAGE |
 | GET | `/api/creative/images/{imageId}` | READ |
 
+## 6b. Optimization actions (increment 4)
+
+```mermaid
+sequenceDiagram
+  participant U as Marketer
+  participant S as Spring (CampaignActionService)
+  participant M as Meta (via FastAPI/MCP)
+  U->>S: preview (manual or from a recommendation)
+  S->>M: read object state (before)
+  S->>S: guardrails (account, no-op, budget policy)
+  S-->>U: before / proposed, warnings
+  U->>S: approve
+  U->>S: execute (confirm)
+  S->>S: claim APPROVED→EXECUTING (once)
+  S->>M: read state again: unchanged since preview?
+  S->>M: apply status / daily budget (only those fields)
+  S->>M: read state (after)
+  S-->>U: SUCCEEDED verified | mismatch | FAILED
+```
+
+* **Supported**: pause and resume a campaign, ad set or ad; set the daily budget of a campaign (CBO) or ad set. Nothing
+  is created or deleted. Lifetime budgets, bids and targeting are not changed.
+* **Guardrails** (`ActionGuardrails`): the object must belong to an ad account mapped to the client; no no-op changes;
+  budget changes must stay within the client's `max_change_pct` (default 20%) and `daily_spend_limit`; resume warns
+  that delivery and spend start immediately (and when a parent is paused).
+* **Stale protection**: previews expire after 24 hours, and execution re-reads Meta first. If the fields being changed
+  differ from the preview, nothing is sent and the change fails with "changed since the preview".
+* **One open change per object** (unique index), and `APPROVED → EXECUTING` is a conditional claim, so concurrent
+  clicks apply once.
+* **Verification**: the result is what Meta reports afterwards, not the API response. Outcomes: `verified`,
+  `mismatch` (accepted but not reflected; notification sent) or `unverified` (could not read back). On an error the
+  state is read first; if Meta already shows the change it is recorded as applied, otherwise it fails and can be
+  retried (status/budget writes set absolute values, so a retry cannot double-apply).
+* **Recommendations**: increase/reduce-budget and pause-for-review recommendations pre-fill a preview
+  (Phase 2 `proposed_change.to` × 100 → minor units, campaign level). Approving the change marks the recommendation
+  accepted. Other recommendation types need the marketer to choose the action.
+* Stored per action: `before_state`, `proposed_after`, `actual_after`, guardrail results, approver, executor and an
+  event log, plus audit events.
+* Fixed along the way: the MCP tools `update_campaign` and `update_ad_set` used to send `status=PAUSED` by default,
+  so a rename or budget-only change would have paused the object. They now send only the fields given.
+
+| Method | Path | Permission |
+|---|---|---|
+| POST | `/api/clients/{clientId}/campaign-actions/preview` | MANAGE |
+| GET | `/api/clients/{clientId}/campaign-actions` | READ |
+| GET | `/api/campaign-actions/{id}` | READ |
+| POST | `/api/campaign-actions/{id}/approve` · `/reject` · `/cancel` | MANAGE |
+| POST | `/api/campaign-actions/{id}/execute` (`{"confirm": true}`) | MANAGE |
+
+FastAPI (service key only, not in the AI allowlist): `POST /api/meta/objects/state` (read) and
+`POST /api/meta/objects/apply` (write, Spring only).
+
 ## 7. Roles and permissions
 
 Spec roles map onto the existing per-client roles (no schema change needed yet):
@@ -294,8 +346,8 @@ No new environment variables in increment 1. Uses the existing `CAMPEX_PLATFORM_
   detailed targeting are not configurable yet. **Real-estate advertisers in many regions must declare the housing
   special ad category**; the current tool sends an empty list. Until that is configurable, review the campaign in Ads
   Manager before activating it.
-* Activation (`PAUSED → ACTIVE`) is not exposed by the execution engine yet; it will be an approved action in
-  increment 4. Campaigns are activated in Ads Manager until then.
+* Activating a newly published campaign uses an Optimization action (resume) with approval; it is never automatic.
+* Budget amounts assume a two-decimal currency (INR) when converting to Meta's minor units.
 * Reconciliation relies on the campaign name containing the publish tag. Renaming the campaign in Ads Manager before
   reconciliation completes would hide it from the lookup.
 * Notifications are in-app only; email/WhatsApp channels are planned.
