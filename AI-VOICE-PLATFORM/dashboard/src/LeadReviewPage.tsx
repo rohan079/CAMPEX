@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
 import { getLeadReviewStats, getLeads, updateLeadReview } from "./api";
-import { displayName, formatDay, num } from "./format";
+import { formatDay, num } from "./format";
 import { LanguagePill, StatusPill } from "./pills";
 import type { Lead, LeadReviewStats, LeadReviewStatus } from "./types";
+import { maskPhone, safeName } from "./privacy";
 
 const PAGE_SIZE = 25;
 type Filter = "all" | LeadReviewStatus;
@@ -53,13 +54,13 @@ export function LeadReviewPage({ clientId }: { clientId?: string }) {
   useEffect(() => { void load(); }, [load]);
 
   async function decide(lead: Lead, decision: LeadReviewStatus) {
-    if (decision === "rejected" && !window.confirm(`Reject ${displayName(lead.first_name, lead.phone_number)}? This cancels queued calls; it does not delete the lead.`)) return;
+    if (decision === "rejected" && !window.confirm(`Reject ${safeName(lead.first_name, lead.phone_number)}? This cancels queued calls; it does not delete the lead.`)) return;
     setBusyId(lead.id);
     setError(null);
     setNotice(null);
     try {
       await updateLeadReview(lead.id, decision);
-      setNotice(`${displayName(lead.first_name, lead.phone_number)} marked ${decision}.`);
+      setNotice(`${safeName(lead.first_name, lead.phone_number)} marked ${decision}.`);
       setRefreshKey((value) => value + 1);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not update the lead review");
@@ -113,7 +114,7 @@ export function LeadReviewPage({ clientId }: { clientId?: string }) {
             {leads.map((lead) => {
               const review = lead.review_status ?? "pending";
               return <tr key={lead.id}>
-                <td><strong>{displayName(lead.first_name, lead.phone_number)}</strong><small>{lead.phone_number}</small></td>
+                <td><strong>{safeName(lead.first_name, lead.phone_number)}</strong><small className="masked">{maskPhone(lead.phone_number)}</small></td>
                 <td><strong>{lead.ad_headline || lead.campaign_id || "Organic / WhatsApp"}</strong><small>{lead.source.replaceAll("_", " ")}</small></td>
                 <td><LanguagePill code={lead.preferred_language} /></td>
                 <td><StatusPill status={lead.status} /></td>

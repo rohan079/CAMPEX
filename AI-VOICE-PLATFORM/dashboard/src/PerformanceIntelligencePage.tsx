@@ -216,7 +216,7 @@ export function AskPanel({ clientId, from, to }: { clientId: string; from: strin
           {!answer.grounded && <p className="notice warn-notice">This answer mentions figures that are not in Campex's data ({answer.unsupported_numbers.join(", ")}). Treat them as unverified.</p>}
           <p>{answer.answer}</p>
           {answer.data_gaps.length > 0 && <details><summary>Data caveats</summary><ul>{answer.data_gaps.map((g, i) => <li key={i}>{g}</li>)}</ul></details>}
-          <small>{answer.provider} · {answer.model} · {formatDay(answer.from)}–{formatDay(answer.to)} vs {formatDay(answer.comparison_from)}–{formatDay(answer.comparison_to)}</small>
+          <small>AI-generated{answer.grounded ? " · figures checked against Campex data" : ""} · {formatDay(answer.from)}–{formatDay(answer.to)} vs {formatDay(answer.comparison_from)}–{formatDay(answer.comparison_to)}</small>
         </div>
       )}
     </section>

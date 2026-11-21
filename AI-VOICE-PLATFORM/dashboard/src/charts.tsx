@@ -15,17 +15,17 @@ import { compactNum, formatDay, money, num } from "./format";
 import type { CallsDay, LeadsDay, SalesDay } from "./types";
 
 export const COLORS = {
-  leads: "#3f6fa3",
-  ads: "#b86114",
-  agent: "#1d6b56",
-  calls: "#c9bfa9",
-  connected: "#1d6b56",
-  grid: "#e7dfcd",
-  axis: "#7a7264",
+  leads: "#5b4fe8",
+  ads: "#e0882a",
+  agent: "#0f9f84",
+  calls: "#c7ccdb",
+  connected: "#0f9f84",
+  grid: "#eceef4",
+  axis: "#7a8197",
 };
 
-export const SERIES_COLORS = ["#b86114", "#1d6b56", "#3f6fa3", "#8d3b3b", "#7a5ea8", "#8a8a3a"];
-export const OTHER_COLOR = "#c9bfa9";
+export const SERIES_COLORS = ["#5b4fe8", "#0f9f84", "#2f80ed", "#e0882a", "#d6456b", "#6b7a99"];
+export const OTHER_COLOR = "#c7ccdb";
 
 const axisProps = { stroke: COLORS.axis, fontSize: 12, tickLine: false, axisLine: false } as const;
 

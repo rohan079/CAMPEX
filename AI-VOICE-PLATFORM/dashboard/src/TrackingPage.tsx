@@ -142,7 +142,7 @@ export function EventMonitor({ clientId, days }: { clientId: string; days: numbe
 
       {selected && (
         <section className="surface-card" aria-label="Event detail">
-          <div className="section-title-row"><div><p className="step-label">EVENT</p><h3>{selected.event_name} · {selected.event_id}</h3></div>
+          <div className="section-title-row"><div><p className="step-label">EVENT</p><h3>{selected.event_name} · {formatWhen(selected.event_time)}</h3></div>
             <button type="button" className="secondary-button" onClick={() => setSelected(null)}>Close</button></div>
           <dl className="facts">
             <div><dt>Sent to Meta as</dt><dd>{selected.meta_event_name ?? "Not sent (internal event)"}</dd></div>
@@ -153,10 +153,10 @@ export function EventMonitor({ clientId, days }: { clientId: string; days: numbe
           <h4>Delivery attempts</h4>
           {!selected.deliveries?.length ? <p className="empty-state">No delivery attempts yet.</p> : (
             <div className="table-wrap"><table>
-              <thead><tr><th>#</th><th>When</th><th>Outcome</th><th>HTTP</th><th>Meta trace</th><th>Message</th></tr></thead>
+              <thead><tr><th>#</th><th>When</th><th>Outcome</th><th>HTTP</th><th>Message</th></tr></thead>
               <tbody>{selected.deliveries.map((d) => (
                 <tr key={d.attempt_number}><td>{d.attempt_number}</td><td>{formatWhen(d.attempted_at)}</td><td>{labelize(d.outcome)}</td>
-                  <td>{d.http_status ?? "—"}</td><td>{d.fbtrace_id ?? "—"}</td><td>{d.error_message ?? (d.events_received !== null ? `${d.events_received} received` : "—")}</td></tr>
+                  <td>{d.http_status ?? "—"}</td><td>{d.error_message ?? (d.events_received !== null ? `${d.events_received} received` : "—")}</td></tr>
               ))}</tbody>
             </table></div>
           )}
@@ -256,7 +256,7 @@ export function PixelManager({ clientId }: { clientId: string }) {
   async function test(pixel: Pixel) {
     try {
       const result = await sendTestEvent(clientId, pixel.id);
-      setNote(`Test event ${result.event_id} queued (${labelize(result.delivery_status)}). Check Events Manager → Test events.`);
+      setNote(`Test event queued (${labelize(result.delivery_status)}). Check Events Manager → Test events.`);
     } catch (err) {
       setError(errorText(err, "Could not send a test event"));
     }

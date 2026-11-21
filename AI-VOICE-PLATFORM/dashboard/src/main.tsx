@@ -1,10 +1,29 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { App } from "./App";
-import { completeSocialRedirect } from "./firebaseAuth";
+import { isFirebaseConfigured } from "./firebaseConfig";
 import "./styles.css";
 
+function SetupRequired() {
+  return (
+    <main className="setup-required">
+      <section className="surface-card">
+        <p className="eyebrow">Configuration needed</p>
+        <h1>Campex can't start yet</h1>
+        <p>Sign-in is not configured for this deployment. An administrator needs to set the
+          <code> VITE_FIREBASE_* </code> environment variables and redeploy.</p>
+      </section>
+    </main>
+  );
+}
+
 async function boot() {
+  const root = createRoot(document.getElementById("root")!);
+  if (!isFirebaseConfigured()) {
+    root.render(<SetupRequired />);
+    return;
+  }
+
+  const [{ App }, { completeSocialRedirect }] = await Promise.all([import("./App"), import("./firebaseAuth")]);
   // Complete any leftover social redirect before React mounts.
   try {
     await completeSocialRedirect();
@@ -12,7 +31,7 @@ async function boot() {
     // Error is stored in sessionStorage for the login card.
   }
 
-  createRoot(document.getElementById("root")!).render(
+  root.render(
     <StrictMode>
       <App />
     </StrictMode>,

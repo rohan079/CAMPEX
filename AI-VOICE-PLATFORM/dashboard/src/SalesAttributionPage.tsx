@@ -3,6 +3,7 @@ import { formatDay, formatWhen, money, num } from "./format";
 import { cancelSale, confirmSale, createClientSale, getSale, labelize, listAgents, listClientSales, listProjects, updateSale } from "./measurementApi";
 import { ClientRequired, ErrorBanner, KpiCard, errorText } from "./measurementUi";
 import type { Agent, Project, SaleListPage, SaleRecord, SaleStatus } from "./measurementTypes";
+import { actorName } from "./privacy";
 
 const STATUSES: SaleStatus[] = ["NEW", "BOOKING_PENDING", "BOOKED", "PAYMENT_PENDING", "PARTIALLY_PAID", "FULLY_PAID", "CANCELLED", "REFUNDED"];
 const CHANNELS = ["sales_team", "ad", "calling_agent", "referral", "walk_in", "other"];
@@ -195,7 +196,7 @@ export function SalePanel({ sale, currency, onClose, onChanged, onError }: {
         <li key={i}><span className="timeline-type">{labelize(h.action)}</span>
           <p>{h.from_status && h.to_status && h.from_status !== h.to_status ? `${labelize(h.from_status)} → ${labelize(h.to_status)}` : labelize(h.to_status)}
             {h.changes ? ` · ${Object.keys(h.changes).filter((k) => k !== "status").join(", ")}` : ""}{h.reason ? ` · ${h.reason}` : ""}</p>
-          <small>{formatWhen(h.changed_at)}{h.actor_email ? ` · ${h.actor_email}` : ""}</small></li>
+          <small>{formatWhen(h.changed_at)}{h.actor_email ? ` · ${actorName(h.actor_email)}` : ""}</small></li>
       ))}</ol>
     </section>
   );

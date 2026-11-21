@@ -5,6 +5,7 @@ import type { Evidence, Recommendation } from "./intelligenceTypes";
 import { labelize } from "./measurementFormat";
 import { ErrorBanner, SourceBadge, errorText } from "./measurementUi";
 import { DataNotes } from "./PerformanceIntelligencePage";
+import { actorName } from "./privacy";
 
 function evidenceValue(e: Evidence) {
   if (e.value === null) return "unavailable";
@@ -90,7 +91,7 @@ export function RecommendationCard({ rec, onDecide }: { rec: Recommendation; onD
       <p><strong>Action:</strong> {rec.recommended_action}</p>
       <p className="estimate"><strong>Expected impact (estimate):</strong> {rec.expected_impact}</p>
       <small>Analysed {rec.analysis_from} – {rec.analysis_to} · created {formatWhen(rec.created_at)} · expires {formatWhen(rec.expires_at)}
-        {rec.decided_by ? ` · ${rec.status} by ${rec.decided_by}` : ""}</small>
+        {rec.decided_by ? ` · ${rec.status} by ${actorName(rec.decided_by)}` : ""}</small>
       <div className="visit-actions">
         <button type="button" className="text-button" onClick={() => setShowEvidence((v) => !v)}>{showEvidence ? "Hide evidence" : "View evidence"}</button>
         {open && <>

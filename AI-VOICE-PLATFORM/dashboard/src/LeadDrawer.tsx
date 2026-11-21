@@ -4,6 +4,7 @@ import { LanguagePill, StatusPill } from "./pills";
 import { SaleForm } from "./SaleForm";
 import { formatDay, formatWhen, labelLanguage } from "./format";
 import type { Client, LanguageCode, LeadDetail } from "./types";
+import { Sensitive, safeName } from "./privacy";
 
 export function LeadDrawer({
   id,
@@ -74,7 +75,7 @@ export function LeadDrawer({
     }
   }
 
-  const title = lead?.first_name?.trim() || lead?.phone_number || "Lead";
+  const title = lead ? safeName(lead.first_name, lead.phone_number) : "Lead";
 
   return (
     <div className="drawer-root">
@@ -94,7 +95,7 @@ export function LeadDrawer({
             <dl className="facts">
               <div>
                 <dt>Phone</dt>
-                <dd>{lead.phone_number}</dd>
+                <dd><Sensitive kind="phone" value={lead.phone_number} /></dd>
               </div>
               <div>
                 <dt>Status</dt>

@@ -51,7 +51,7 @@ describe("Pixel setup screen", () => {
     render(<PixelManager clientId="c1" />);
     fireEvent.click(await screen.findByText("Send test event"));
     await waitFor(() => expect(m.sendTestEvent).toHaveBeenCalledWith("c1", "p1"));
-    expect(await screen.findByText(/Test event test-1 queued/)).toBeTruthy();
+    expect(await screen.findByText(/Test event queued/)).toBeTruthy();
   });
 });
 
@@ -87,6 +87,6 @@ describe("Event monitoring", () => {
     render(<EventMonitor clientId="c1" days={30} />);
     fireEvent.click(await screen.findByText("1 duplicate(s)"));
     expect(await screen.findByText("Invalid parameter")).toBeTruthy();
-    expect(screen.getByText("T1")).toBeTruthy();
+    expect(screen.queryByText("T1")).toBeNull();
   });
 });
