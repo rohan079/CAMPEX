@@ -3,6 +3,7 @@ import { formatWhen, num } from "./format";
 import { labelize, listAgents, listSiteVisits, rescheduleSiteVisit, updateSiteVisitStatus } from "./measurementApi";
 import { ClientRequired, ErrorBanner, KpiCard, errorText } from "./measurementUi";
 import type { Agent, SiteVisit } from "./measurementTypes";
+import { maskPhone, safeName } from "./privacy";
 
 const OUTCOMES = ["interested", "negotiation", "booked", "follow_up_needed", "not_interested"];
 
@@ -78,7 +79,7 @@ export function SiteVisitsPage({ clientId }: { clientId?: string }) {
                 {dayVisits.map((v) => (
                   <button key={v.id} type="button" className={`visit-chip visit-${v.status.toLowerCase()}`} onClick={() => setSelected(v)}>
                     <strong>{new Intl.DateTimeFormat("en-IN", { hour: "2-digit", minute: "2-digit" }).format(new Date(v.scheduled_at))}</strong>
-                    <span>{v.lead_name ?? v.lead_phone}</span><small>{labelize(v.status)}</small>
+                    <span>{safeName(v.lead_name, v.lead_phone)}</span><small>{labelize(v.status)}</small>
                   </button>
                 ))}
               </section>
@@ -93,7 +94,7 @@ export function SiteVisitsPage({ clientId }: { clientId?: string }) {
               <thead><tr><th>When</th><th>Customer</th><th>Project</th><th>Agent</th><th>Status</th><th>Outcome</th></tr></thead>
               <tbody>{visits.map((v) => (
                 <tr key={v.id} className="click-row" onClick={() => setSelected(v)}>
-                  <td>{formatWhen(v.scheduled_at)}</td><td><strong>{v.lead_name ?? "—"}</strong><small>{v.lead_phone}</small></td>
+                  <td>{formatWhen(v.scheduled_at)}</td><td><strong>{safeName(v.lead_name, v.lead_phone)}</strong><small className="masked">{maskPhone(v.lead_phone)}</small></td>
                   <td>{v.project_name ?? "—"}</td><td>{v.agent_name ?? "—"}</td>
                   <td>{labelize(v.status)}{v.customer_confirmed ? " ✓" : ""}</td><td>{labelize(v.outcome)}</td>
                 </tr>
@@ -129,7 +130,7 @@ export function VisitPanel({ visit, onClose, onChanged, onError }: {
   return (
     <section className="surface-card" aria-label="Visit detail">
       <div className="section-title-row"><div><p className="step-label">SITE VISIT</p>
-        <h3>{visit.lead_name ?? visit.lead_phone} · {formatWhen(visit.scheduled_at)}</h3></div>
+        <h3>{safeName(visit.lead_name, visit.lead_phone)} · {formatWhen(visit.scheduled_at)}</h3></div>
         <button type="button" className="secondary-button" onClick={onClose}>Close</button></div>
       <dl className="facts">
         <div><dt>Status</dt><dd>{labelize(visit.status)}</dd></div>

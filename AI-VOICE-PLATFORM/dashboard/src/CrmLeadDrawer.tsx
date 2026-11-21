@@ -7,6 +7,7 @@ import {
 } from "./measurementApi";
 import { errorText } from "./measurementUi";
 import type { Activity, Agent, CrmLeadDetail, LeadAttribution, PipelineStatus, Project, Qualification } from "./measurementTypes";
+import { Sensitive, actorName, safeName } from "./privacy";
 
 type Tab = "overview" | "qualification" | "activity";
 
@@ -66,7 +67,7 @@ export function CrmLeadDrawer({ leadId, agents, projects, onClose, onChanged }: 
       <aside className="drawer crm-drawer" role="dialog" aria-modal="true" aria-labelledby="crm-lead-title">
         <div className="drawer-head">
           <div><p className="eyebrow">{lead ? STATUS_LABELS[lead.pipeline_status] : "Lead"}</p>
-            <h2 id="crm-lead-title">{lead?.name || lead?.phone_number || "Lead"}</h2></div>
+            <h2 id="crm-lead-title">{lead ? safeName(lead.name, lead.phone_number) : "Lead"}</h2></div>
           <button type="button" className="refresh" onClick={onClose}>Close</button>
         </div>
         {error && <p className="banner" role="alert">{error}</p>}
@@ -82,8 +83,8 @@ export function CrmLeadDrawer({ leadId, agents, projects, onClose, onChanged }: 
             {tab === "overview" && (
               <>
                 <dl className="facts">
-                  <div><dt>Phone</dt><dd>{lead.phone_number}</dd></div>
-                  <div><dt>Email</dt><dd>{lead.email ?? "—"}</dd></div>
+                  <div><dt>Phone</dt><dd><Sensitive kind="phone" value={lead.phone_number} /></dd></div>
+                  <div><dt>Email</dt><dd><Sensitive kind="email" value={lead.email} /></dd></div>
                   <div><dt>Source</dt><dd>{labelize(attribution?.attribution_source ?? lead.source)}</dd></div>
                   <div><dt>Response time</dt><dd>{lead.response_time_minutes === null ? "Not contacted yet" : `${lead.response_time_minutes} min`}</dd></div>
                   <div><dt>Review</dt><dd>{labelize(lead.review_status)}</dd></div>
@@ -127,7 +128,7 @@ export function CrmLeadDrawer({ leadId, agents, projects, onClose, onChanged }: 
                 {lead.duplicates.length > 0 && (
                   <section>
                     <h3>Possible duplicates</h3>
-                    <ul className="plain-list">{lead.duplicates.map((d) => <li key={d.id}>{d.name ?? d.phone_number} · {STATUS_LABELS[d.pipeline_status] ?? d.pipeline_status}</li>)}</ul>
+                    <ul className="plain-list">{lead.duplicates.map((d) => <li key={d.id}>{safeName(d.name, d.phone_number)} · {STATUS_LABELS[d.pipeline_status] ?? d.pipeline_status}</li>)}</ul>
                   </section>
                 )}
 
@@ -295,7 +296,7 @@ function ActivityTimeline({ activities, history, onAdd }: {
       <ol className="timeline">
         {activities.map((a) => (
           <li key={a.id}><span className="timeline-type">{labelize(a.activity_type)}</span><p>{a.body}</p>
-            <small>{formatWhen(a.occurred_at)}{a.actor_email ? ` · ${a.actor_email}` : ""}</small></li>
+            <small>{formatWhen(a.occurred_at)}{a.actor_email ? ` · ${actorName(a.actor_email)}` : ""}</small></li>
         ))}
       </ol>
       {activities.length === 0 && <p className="empty">No activity yet.</p>}

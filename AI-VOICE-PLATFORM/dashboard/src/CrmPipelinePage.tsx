@@ -6,6 +6,7 @@ import {
 } from "./measurementApi";
 import { ClientRequired, ErrorBanner, errorText } from "./measurementUi";
 import type { Agent, AgentPerformance, LeadCard, Pipeline, Project } from "./measurementTypes";
+import { safeName } from "./privacy";
 
 export const STATUS_LABELS: Record<string, string> = {
   NEW: "New", CONTACTED: "Contacted", QUALIFIED: "Qualified", SITE_VISIT_SCHEDULED: "Site visit scheduled",
@@ -101,8 +102,8 @@ export function CrmPipelinePage({ clientId, days }: { clientId?: string; days: n
 function LeadCardView({ lead, onOpen }: { lead: LeadCard; onOpen: () => void }) {
   const overdue = lead.next_follow_up_at && new Date(lead.next_follow_up_at).getTime() < Date.now();
   return (
-    <button type="button" className="lead-card" onClick={onOpen} aria-label={`Open ${lead.name}`}>
-      <span className="lead-card-top"><strong>{lead.name}</strong>
+    <button type="button" className="lead-card" onClick={onOpen} aria-label={`Open ${safeName(lead.name)}`}>
+      <span className="lead-card-top"><strong>{safeName(lead.name)}</strong>
         {lead.qualification_score !== null && <span className="score-chip" title="Qualification score">{lead.qualification_score}</span>}</span>
       <small>{lead.campaign_label ?? labelize(lead.attribution_source)}</small>
       <small>{lead.assigned_agent_name ?? "Unassigned"}{lead.review_status === "rejected" ? " · rejected in review" : ""}</small>
