@@ -34,7 +34,7 @@ const CLIENT_KEY = "campaign-workspace.client";
 const DAYS_KEY = "campaign-workspace.days";
 
 const PAGE_META: Record<View, { title: string; eyebrow: string; description: string }> = {
-  campaigns: { title: "Campaign studio", eyebrow: "Create and distribute", description: "Plan one creative for every channel." },
+  campaigns: { title: "Campaign studio", eyebrow: "Plan, check and send", description: "Build a Meta campaign step by step, check it against the client's budget and send it for approval." },
   creative: { title: "Creative studio", eyebrow: "AI artwork and copy", description: "Generate, review and approve ad creatives grounded in verified project facts." },
   automation: { title: "Automation rules", eyebrow: "Monitor and alert", description: "Rules that watch spend, CTR, cost per lead and delivery, with approval-based actions." },
   actions: { title: "Optimization actions", eyebrow: "Approve and verify", description: "Pause, resume or rebudget live campaigns with approval, guardrails and before/after checks." },

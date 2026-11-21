@@ -1,725 +1,670 @@
-import { useEffect, useMemo, useState } from "react";
-import type { ChangeEvent, FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import type { ChangeEvent, FormEvent, ReactNode } from "react";
 import { ApiError, assistCampaign, getMetaConnection } from "./api";
-import { createExecution, submitExecution, updateExecution, validateExecution } from "./executionApi";
-import type { CampaignConfig, ExecutionDetail } from "./executionTypes";
 import type { MetaConnectionStatus } from "./api";
+import { getCreative, listCreatives } from "./creativeApi";
+import type { CreativeSummary } from "./creativeTypes";
+import { AuthImage } from "./CreativeStudioPage";
+import { createExecution, getExecution, listExecutions, submitExecution, updateExecution, validateExecution } from "./executionApi";
+import type { CampaignConfig, ExecutionDetail, ExecutionSummary } from "./executionTypes";
+import { getBudgetPolicy } from "./intelligenceApi";
+import type { BudgetPolicy } from "./intelligenceTypes";
 import type { CampaignPlatform, Client, LanguageCode } from "./types";
 
-const META_PUBLISH_PLATFORMS = new Set<CampaignPlatform>(["facebook", "instagram", "whatsapp_ads"]);
+/**
+ * Campaign Studio: a guided builder for Meta campaigns. It saves server-side drafts and sends them for approval;
+ * publishing (always PAUSED) happens in Campaign approvals. Everything shown here maps to fields Campex actually
+ * sends to Meta; anything not yet supported is labelled as such.
+ */
 
 type Objective = "leads" | "traffic" | "sales" | "awareness";
-type Draft = {
-  id: string;
-  clientId: string;
+type StepId = "goal" | "audience" | "budget" | "ad" | "review";
+type Placement = "facebook" | "instagram" | "whatsapp_ads";
+type PreviewKind = "fb_feed" | "ig_feed" | "story";
+
+interface StudioForm {
   name: string;
   objective: Objective;
-  platforms: CampaignPlatform[];
-  language: LanguageCode;
+  adAccountId: string;
+  pageId: string;
   location: string;
   ageMin: number;
   ageMax: number;
+  placements: Placement[];
+  language: LanguageCode;
+  dailyBudget: string;
   headline: string;
   body: string;
+  description: string;
   cta: string;
-  imageName: string;
-  savedAt: string;
-};
-type AssistantMessage = { role: "assistant" | "user"; content: string; suggestedCopy?: string };
-
-const STORAGE_KEY = "campaign-studio.drafts.v2";
-const AGE_MIN_FLOOR = 18;
-const AGE_MAX_CEILING = 65;
-const CHANNELS: Array<{ id: CampaignPlatform; mark: string; label: string; detail: string; color: string }> = [
-  { id: "facebook", mark: "f", label: "Facebook", detail: "Feed and stories", color: "facebook" },
-  { id: "instagram", mark: "◎", label: "Instagram", detail: "Feed, stories and reels", color: "instagram" },
-  { id: "whatsapp_business", mark: "◔", label: "WhatsApp", detail: "Business messages", color: "whatsapp" },
-  { id: "google_ads", mark: "G", label: "Google Ads", detail: "Search and display", color: "google" },
-  { id: "whatsapp_ads", mark: "↗", label: "WhatsApp Ads", detail: "Click-to-WhatsApp via Meta", color: "whatsapp-ads" },
-];
-
-const INITIAL_MESSAGES: AssistantMessage[] = [
-  {
-    role: "assistant",
-    content: "Share a brief and I’ll summarize the offer or refine copy for the selected channels. I won’t add unverified prices or property claims.",
-  },
-];
-
-function clampAge(value: number, fallback: number): number {
-  if (!Number.isFinite(value)) return fallback;
-  return Math.min(AGE_MAX_CEILING, Math.max(AGE_MIN_FLOOR, Math.round(value)));
+  url: string;
+  utm: boolean;
+  creativeId: string | null;
+  creativeVersion: number | null;
+  creativeImageId: string | null;
 }
 
-function normalizeDraft(raw: Partial<Draft> & { id?: string }): Draft | null {
-  if (!raw || typeof raw.id !== "string" || !raw.id) return null;
-  const ageMin = clampAge(Number(raw.ageMin ?? AGE_MIN_FLOOR), AGE_MIN_FLOOR);
-  let ageMax = clampAge(Number(raw.ageMax ?? AGE_MAX_CEILING), AGE_MAX_CEILING);
-  if (ageMax < ageMin) ageMax = ageMin;
+type Issue = { step: StepId; level: "error" | "warning"; text: string };
+type AssistantMessage = { role: "assistant" | "user"; content: string; suggestedCopy?: string };
+
+const AGE_MIN = 18;
+const AGE_MAX = 65;
+const LEGACY_KEYS = ["campaign-studio.drafts.v2", "campaign-studio.drafts.v1"];
+
+const OBJECTIVES: Record<Objective, { label: string; icon: string; optimizes: string; bestFor: string; measure: string }> = {
+  leads: { label: "Leads", icon: "✉", optimizes: "Lead generation", bestFor: "Site-visit requests, brochure downloads, call-backs", measure: "Cost per qualified lead (CRM-verified)" },
+  traffic: { label: "Traffic", icon: "↗", optimizes: "Link clicks", bestFor: "Sending buyers to a project or landing page", measure: "Cost per landing-page visit, then leads" },
+  sales: { label: "Sales", icon: "₹", optimizes: "Website conversions (needs the Campex pixel)", bestFor: "Bookings or token payments tracked on your site", measure: "Cost per booking, ROAS" },
+  awareness: { label: "Awareness", icon: "◎", optimizes: "Reach", bestFor: "Launch announcements and brand recall", measure: "Reach, frequency, cost per 1,000 reached" },
+};
+
+const PLACEMENTS: { id: Placement; label: string; detail: string; mark: string; color: string }[] = [
+  { id: "facebook", label: "Facebook", detail: "Feed and Stories", mark: "f", color: "facebook" },
+  { id: "instagram", label: "Instagram", detail: "Feed, Stories and Reels", mark: "◎", color: "instagram" },
+  { id: "whatsapp_ads", label: "Click-to-WhatsApp", detail: "Runs on Facebook placements", mark: "↗", color: "whatsapp-ads" },
+];
+
+const CTAS: { id: string; label: string }[] = [
+  { id: "LEARN_MORE", label: "Learn more" }, { id: "BOOK_NOW", label: "Book now" }, { id: "SIGN_UP", label: "Sign up" },
+  { id: "CONTACT_US", label: "Contact us" }, { id: "GET_QUOTE", label: "Get quote" }, { id: "MESSAGE_PAGE", label: "Send message" },
+  { id: "APPLY_NOW", label: "Apply now" },
+];
+
+const AGE_PRESETS: [number, number][] = [[25, 45], [30, 55], [35, 65], [18, 65]];
+const BUDGET_PRESETS = [500, 1000, 2000, 5000];
+
+const STEPS: { id: StepId; label: string; hint: string }[] = [
+  { id: "goal", label: "Goal", hint: "Objective and account" },
+  { id: "audience", label: "Audience", hint: "Who sees it, where" },
+  { id: "budget", label: "Budget", hint: "Daily spend and forecast" },
+  { id: "ad", label: "Ad", hint: "Creative, copy and link" },
+  { id: "review", label: "Review", hint: "Checks and approval" },
+];
+
+function blankForm(): StudioForm {
   return {
-    id: raw.id,
-    clientId: typeof raw.clientId === "string" ? raw.clientId : "",
-    name: typeof raw.name === "string" ? raw.name : "",
-    objective: (raw.objective as Objective) || "leads",
-    platforms: Array.isArray(raw.platforms) ? raw.platforms as CampaignPlatform[] : ["facebook", "instagram"],
-    language: (raw.language as LanguageCode) || "en",
-    location: typeof raw.location === "string" ? raw.location : "",
-    ageMin,
-    ageMax,
-    headline: typeof raw.headline === "string" ? raw.headline : "",
-    body: typeof raw.body === "string" ? raw.body : "",
-    cta: typeof raw.cta === "string" ? raw.cta : "Learn more",
-    imageName: typeof raw.imageName === "string" ? raw.imageName : "",
-    savedAt: typeof raw.savedAt === "string" ? raw.savedAt : new Date().toISOString(),
+    name: "", objective: "leads", adAccountId: "", pageId: "", location: "", ageMin: 25, ageMax: 55,
+    placements: ["facebook", "instagram"], language: "en", dailyBudget: "1000", headline: "", body: "", description: "",
+    cta: "LEARN_MORE", url: "", utm: true, creativeId: null, creativeVersion: null, creativeImageId: null,
   };
 }
 
-function readDrafts(): Draft[] {
+const clampAge = (v: number, fallback: number) => (Number.isFinite(v) ? Math.min(AGE_MAX, Math.max(AGE_MIN, Math.round(v))) : fallback);
+const inr = (n: number) => new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(n);
+const slug = (v: string) => v.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60);
+
+/** Adds standard UTM tags so CRM attribution can tell paid social traffic apart. Existing utm_* params win. */
+export function withUtm(url: string, campaignName: string): string {
   try {
-    const keys = [STORAGE_KEY, "campaign-studio.drafts.v1"];
-    for (const key of keys) {
-      const value: unknown = JSON.parse(localStorage.getItem(key) ?? "null");
-      if (!Array.isArray(value)) continue;
-      const drafts = value.map((item) => normalizeDraft(item as Partial<Draft>)).filter((item): item is Draft => item !== null);
-      if (drafts.length || key === STORAGE_KEY) return drafts;
-    }
-    return [];
+    const u = new URL(url);
+    const set = (k: string, v: string) => { if (!u.searchParams.has(k)) u.searchParams.set(k, v); };
+    set("utm_source", "meta");
+    set("utm_medium", "paid_social");
+    set("utm_campaign", slug(campaignName) || "campaign");
+    return u.toString();
   } catch {
-    return [];
+    return url;
   }
 }
 
-/** Studio CTA labels → Meta call-to-action types accepted by the execution engine. */
-const CTA_TYPES: Record<string, string> = {
-  "Learn more": "LEARN_MORE",
-  "Send message": "MESSAGE_PAGE",
-  "Sign up": "SIGN_UP",
-  "Contact us": "CONTACT_US",
-};
+export function studioIssues(f: StudioForm, policy: BudgetPolicy | null, mappedAccount: boolean | null): Issue[] {
+  const out: Issue[] = [];
+  const e = (step: StepId, text: string) => out.push({ step, level: "error", text });
+  const w = (step: StepId, text: string) => out.push({ step, level: "warning", text });
+  if (!f.name.trim()) e("goal", "Name the campaign.");
+  if (!f.adAccountId) e("goal", "Choose the Meta ad account.");
+  if (mappedAccount === false) e("goal", "This ad account is not mapped to the client (Tracking → Ad accounts).");
+  if (!f.pageId) w("goal", "No Facebook Page selected; Meta needs one for the ad.");
+  if (!f.location.trim()) e("audience", "Add a target location.");
+  if (f.ageMax < f.ageMin) e("audience", "Maximum age is below minimum age.");
+  if (f.placements.length === 0) e("audience", "Choose at least one placement.");
+  const budget = Number(f.dailyBudget);
+  if (!Number.isFinite(budget) || budget < 1) e("budget", "Set a daily budget of at least ₹1.");
+  else if (policy?.daily_spend_limit != null && budget > policy.daily_spend_limit) {
+    e("budget", `Above the client's daily limit of ${inr(policy.daily_spend_limit)}.`);
+  }
+  if (!f.headline.trim()) e("ad", "Write a headline.");
+  else if (f.headline.trim().length > 40) w("ad", "Headlines over 40 characters get cut off in feeds.");
+  if (!f.body.trim()) e("ad", "Write the primary text.");
+  else if (f.body.trim().length > 125) w("ad", "Primary text over 125 characters hides behind “See more”.");
+  const needsUrl = f.objective === "traffic" || f.objective === "sales";
+  if (needsUrl && !f.url.trim()) e("ad", "Traffic and sales campaigns need a destination URL.");
+  if (f.url.trim() && !/^https:\/\/[^\s/]+\.[^\s]+/i.test(f.url.trim())) e("ad", "The destination must be a public https:// link.");
+  if (!f.creativeId) w("ad", "No approved creative attached: the copy hasn't been through creative review.");
+  if (f.objective === "sales") w("goal", "Sales optimizes for website conversions; make sure the Campex pixel is installed.");
+  return out;
+}
 
-export function CampaignStudio({
-  client,
-  onOpenChannels,
-  onOpenApprovals,
-}: {
+export function CampaignStudio({ client, onOpenChannels, onOpenApprovals }: {
   client?: Client;
   onOpenChannels: () => void;
   onOpenApprovals?: (executionId?: string) => void;
 }) {
-  const [drafts, setDrafts] = useState<Draft[]>(readDrafts);
+  const [form, setForm] = useState<StudioForm>(blankForm);
+  const [step, setStep] = useState<StepId>("goal");
+  const [meta, setMeta] = useState<MetaConnectionStatus | null>(null);
+  const [metaLoading, setMetaLoading] = useState(true);
+  const [policy, setPolicy] = useState<BudgetPolicy | null>(null);
+  const [creatives, setCreatives] = useState<CreativeSummary[]>([]);
+  const [drafts, setDrafts] = useState<ExecutionSummary[]>([]);
   const [draftId, setDraftId] = useState<string | null>(null);
-  const [name, setName] = useState("");
-  const [objective, setObjective] = useState<Objective>("leads");
-  const [platforms, setPlatforms] = useState<CampaignPlatform[]>(["facebook", "instagram"]);
-  const [language, setLanguage] = useState<LanguageCode>("en");
-  const [location, setLocation] = useState("");
-  const [ageMin, setAgeMin] = useState(AGE_MIN_FLOOR);
-  const [ageMax, setAgeMax] = useState(AGE_MAX_CEILING);
-  const [headline, setHeadline] = useState("");
-  const [body, setBody] = useState("");
-  const [cta, setCta] = useState("Learn more");
-  const [image, setImage] = useState<File | null>(null);
-  const [imageUrl, setImageUrl] = useState<string | null>(null);
-  const [imageError, setImageError] = useState<string | null>(null);
-  const [previewPlatform, setPreviewPlatform] = useState<CampaignPlatform>("facebook");
-  const [prompt, setPrompt] = useState("");
-  const [messages, setMessages] = useState<AssistantMessage[]>(INITIAL_MESSAGES);
-  const [aiBusy, setAiBusy] = useState(false);
-  const [publishBusy, setPublishBusy] = useState(false);
+  const [draftStatus, setDraftStatus] = useState<string | null>(null);
+  const [dirty, setDirty] = useState(false);
+  const [saveKey, setSaveKey] = useState(() => crypto.randomUUID());
+  const [busy, setBusy] = useState<"save" | "send" | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [metaConnection, setMetaConnection] = useState<MetaConnectionStatus | null>(null);
-  const [metaLoading, setMetaLoading] = useState(true);
-  const [selectedAdAccountId, setSelectedAdAccountId] = useState("");
-  const [selectedPageId, setSelectedPageId] = useState("");
-  const [dailyBudget, setDailyBudget] = useState("500");
-  const [destinationUrl, setDestinationUrl] = useState("");
-  const [submittedId, setSubmittedId] = useState<string | null>(null);
-  // The server-side draft this studio session created; edits update it instead of creating another draft.
-  const [serverDraftId, setServerDraftId] = useState<string | null>(null);
-  const [validationErrors, setValidationErrors] = useState<string[]>([]);
-  // One key per form state, so a double click (or a retry after a network error) cannot create two drafts.
-  const [submitKey, setSubmitKey] = useState(() => crypto.randomUUID());
+  const [serverErrors, setServerErrors] = useState<string[]>([]);
+  const [image, setImage] = useState<File | null>(null);
+  const [imageUrl, setImageUrl] = useState<string | null>(null);
+  const [preview, setPreview] = useState<PreviewKind>("fb_feed");
 
-  useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(drafts));
-  }, [drafts]);
+  const set = useCallback(<K extends keyof StudioForm>(key: K, value: StudioForm[K]) => {
+    setForm((f) => ({ ...f, [key]: value }));
+    setDirty(true);
+    setSaveKey(crypto.randomUUID());
+    setNotice(null);
+  }, []);
 
-  useEffect(() => {
-    setSubmitKey(crypto.randomUUID());
-    setSubmittedId(null);
-  }, [name, objective, platforms, location, ageMin, ageMax, headline, body, cta, dailyBudget, destinationUrl,
-    selectedAdAccountId, selectedPageId, client?.id]);
-
-  useEffect(() => setServerDraftId(null), [client?.id]);
-
+  // Meta connection (ad accounts and Pages)
   useEffect(() => {
     let active = true;
     setMetaLoading(true);
-    void getMetaConnection()
+    getMetaConnection()
       .then((status) => {
         if (!active) return;
-        setMetaConnection(status);
-        setSelectedAdAccountId((current) => current || status.ad_accounts[0]?.id || "");
-        setSelectedPageId((current) => current || status.pages[0]?.id || "");
+        setMeta(status);
+        setForm((f) => ({ ...f, adAccountId: f.adAccountId || status.ad_accounts[0]?.id || "", pageId: f.pageId || status.pages[0]?.id || "" }));
       })
-      .catch(() => {
-        if (!active) return;
-        setMetaConnection(null);
-      })
-      .finally(() => {
-        if (active) setMetaLoading(false);
-      });
+      .catch(() => active && setMeta(null))
+      .finally(() => active && setMetaLoading(false));
     return () => { active = false; };
   }, []);
 
+  // Client-scoped data: budget policy, approved creatives, server drafts
+  const loadDrafts = useCallback(async () => {
+    if (!client) { setDrafts([]); return; }
+    try { setDrafts(await listExecutions(client.id)); } catch { setDrafts([]); }
+  }, [client]);
   useEffect(() => {
-    if (!image) {
-      setImageUrl(null);
-      return;
-    }
-    const next = URL.createObjectURL(image);
-    setImageUrl(next);
-    return () => URL.revokeObjectURL(next);
+    setPolicy(null); setCreatives([]); setDraftId(null); setDraftStatus(null);
+    if (!client) return;
+    getBudgetPolicy(client.id).then(setPolicy).catch(() => setPolicy(null));
+    listCreatives(client.id, "APPROVED").then(setCreatives).catch(() => setCreatives([]));
+    void loadDrafts();
+  }, [client, loadDrafts]);
+
+  useEffect(() => {
+    if (!image) { setImageUrl(null); return undefined; }
+    const url = URL.createObjectURL(image);
+    setImageUrl(url);
+    return () => URL.revokeObjectURL(url);
   }, [image]);
 
-  const selectedNames = useMemo(
-    () => CHANNELS.filter((channel) => platforms.includes(channel.id)).map((channel) => channel.label),
-    [platforms],
-  );
+  const metaReady = Boolean(meta?.connected && !meta.expired && (meta.ad_accounts?.length ?? 0) > 0);
+  const issues = useMemo(() => studioIssues(form, policy, null), [form, policy]);
+  const errorsFor = (s: StepId) => issues.filter((i) => i.step === s && i.level === "error");
+  const stepDone = (s: StepId) => s === "review" ? false : errorsFor(s).length === 0;
+  const blocking = issues.filter((i) => i.level === "error");
+  const finalUrl = form.url.trim() && form.utm ? withUtm(form.url.trim(), form.name) : form.url.trim();
+  const budget = Number(form.dailyBudget) || 0;
+  const account = meta?.ad_accounts.find((a) => a.id === form.adAccountId);
+  const page = meta?.pages.find((p) => p.id === form.pageId);
 
-  const metaPlatforms = useMemo(
-    () => platforms.filter((platform) => META_PUBLISH_PLATFORMS.has(platform)),
-    [platforms],
-  );
-
-  const metaReady = Boolean(
-    metaConnection?.connected
-      && !metaConnection.expired
-      && (metaConnection.ad_accounts?.length ?? 0) > 0,
-  );
-
-  const unsupportedSelected = platforms.some((platform) => !META_PUBLISH_PLATFORMS.has(platform));
-  const canPublish = metaReady && metaPlatforms.length > 0 && !unsupportedSelected;
-
-  function togglePlatform(platform: CampaignPlatform) {
-    setPlatforms((current) => current.includes(platform)
-      ? current.filter((item) => item !== platform)
-      : [...current, platform]);
-    setNotice(null);
+  function suggestName() {
+    const month = new Intl.DateTimeFormat("en-IN", { month: "short", year: "2-digit" }).format(new Date());
+    const parts = [client?.name, OBJECTIVES[form.objective].label, form.location.trim() || undefined, month].filter(Boolean);
+    set("name", parts.join(" | ").slice(0, 140));
   }
 
-  function chooseImage(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0] ?? null;
-    setImageError(null);
-    if (!file) {
-      setImage(null);
+  async function attachCreative(id: string) {
+    if (!id) {
+      setForm((f) => ({ ...f, creativeId: null, creativeVersion: null, creativeImageId: null }));
+      setDirty(true);
       return;
     }
-    if (!file.type.startsWith("image/")) {
-      setImageError("Choose an image file.");
-      event.target.value = "";
-      return;
+    try {
+      const d = await getCreative(id);
+      const v = d.versions.find((x) => x.version === d.asset.approved_version);
+      if (!v) return;
+      setForm((f) => ({ ...f, creativeId: id, creativeVersion: v.version, creativeImageId: v.image_id,
+        headline: v.headline ?? "", body: v.primary_text ?? "", description: v.description ?? "", cta: v.cta ?? f.cta }));
+      setDirty(true);
+      setSaveKey(crypto.randomUUID());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not load the creative");
     }
-    if (file.size > 10 * 1024 * 1024) {
-      setImageError("Images must be 10 MB or smaller.");
-      event.target.value = "";
-      return;
-    }
-    setImage(file);
   }
 
-  function saveDraft() {
-    setError(null);
-    setNotice(null);
-    if (!client) {
-      setError("Choose a client before saving a campaign draft.");
-      return;
-    }
-    if (!name.trim() || platforms.length === 0 || !body.trim()) {
-      setError("Add a campaign name, select at least one channel, and write the ad copy.");
-      return;
-    }
-    if (!location.trim()) {
-      setError("Add a target location for the campaign audience.");
-      return;
-    }
-    const nextAgeMin = clampAge(ageMin, AGE_MIN_FLOOR);
-    const nextAgeMax = clampAge(ageMax, AGE_MAX_CEILING);
-    if (nextAgeMax < nextAgeMin) {
-      setError("Maximum age must be greater than or equal to minimum age.");
-      return;
-    }
-    const id = draftId ?? crypto.randomUUID();
-    const draft: Draft = {
-      id,
-      clientId: client.id,
-      name: name.trim(),
-      objective,
-      platforms,
-      language,
-      location: location.trim(),
-      ageMin: nextAgeMin,
-      ageMax: nextAgeMax,
-      headline: headline.trim(),
-      body: body.trim(),
-      cta,
-      imageName: image?.name ?? "",
-      savedAt: new Date().toISOString(),
+  function toConfig(): CampaignConfig {
+    return {
+      ad_account_id: form.adAccountId, name: form.name.trim(), objective: form.objective, platforms: form.placements,
+      location: form.location.trim(), age_min: form.ageMin, age_max: form.ageMax,
+      daily_budget_minor: Math.round(budget * 100), headline: form.headline.trim(), primary_text: form.body.trim(),
+      description: form.description.trim() || null, cta: form.cta, destination_url: finalUrl || null, page_id: form.pageId || null,
+      creative_asset_id: form.creativeId, creative_version: form.creativeVersion,
     };
-    setDrafts((current) => [draft, ...current.filter((item) => item.id !== id)]);
-    setDraftId(id);
-    setNotice(image
-      ? "Draft saved in this browser. The selected image file is not stored; choose it again after reloading. Nothing has been published."
-      : "Draft saved in this browser. Nothing has been published.");
   }
 
-  function loadDraft(draft: Draft) {
-    setDraftId(draft.id);
-    setName(draft.name);
-    setObjective(draft.objective);
-    setPlatforms(draft.platforms);
-    setLanguage(draft.language);
-    setLocation(draft.location);
-    setAgeMin(draft.ageMin);
-    setAgeMax(draft.ageMax);
-    setHeadline(draft.headline);
-    setBody(draft.body);
-    setCta(draft.cta);
-    setImage(null);
-    setError(null);
-    setNotice(`Loaded “${draft.name}”. Re-select its image to preview it.`);
-  }
-
-  async function askAssistant(event: FormEvent) {
-    event.preventDefault();
-    const question = prompt.trim();
-    if (!question || platforms.length === 0 || aiBusy) return;
-    setMessages((current) => [...current, { role: "user", content: question }]);
-    setPrompt("");
-    setAiBusy(true);
-    try {
-      const result = await assistCampaign({
-        campaign_name: name.trim() || "Untitled campaign",
-        objective,
-        platforms,
-        language,
-        prompt: question,
-        content: [headline.trim(), body.trim()].filter(Boolean).join("\n\n") || "No draft copy supplied.",
-        ad_account_id: selectedAdAccountId || undefined,
-        client_id: client?.id || undefined,
-        client_name: client?.name || undefined,
-      });
-      setMessages((current) => [...current, {
-        role: "assistant",
-        content: result.reply,
-        suggestedCopy: result.suggested_copy ?? undefined,
-      }]);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "The AI assistant is unavailable.";
-      setMessages((current) => [...current, { role: "assistant", content: `I couldn’t complete that request: ${message}` }]);
-    } finally {
-      setAiBusy(false);
+  /** Creates or updates the server draft. A changed form gets a new idempotency key, so a double click saves once. */
+  async function persist(): Promise<ExecutionDetail | null> {
+    if (!client) { setError("Choose a client first."); return null; }
+    if (!form.name.trim() || !form.adAccountId) { setError("Name the campaign and choose an ad account before saving."); setStep("goal"); return null; }
+    let saved: ExecutionDetail | null = null;
+    if (draftId && (draftStatus === null || ["DRAFT", "READY_FOR_REVIEW", "PENDING_APPROVAL", "APPROVED"].includes(draftStatus))) {
+      try {
+        saved = dirty ? await updateExecution(draftId, toConfig()) : await getExecution(draftId);
+      } catch (err) {
+        if (!(err instanceof ApiError && (err.status === 409 || err.status === 404))) throw err;
+      }
     }
+    saved ??= await createExecution(client.id, toConfig(), saveKey);
+    setDraftId(saved.execution.id);
+    setDraftStatus(saved.execution.status);
+    setDirty(false);
+    return saved;
   }
 
-  function applySuggestion(copy: string) {
-    if (!copy) return;
-    setBody(copy);
-    setNotice("AI suggestion copied into the ad copy. Review all factual claims before publishing.");
+  async function saveDraft() {
+    setBusy("save"); setError(null); setNotice(null); setServerErrors([]);
+    try {
+      const saved = await persist();
+      if (saved) { setNotice(`Draft saved in Campex (version ${saved.execution.config_version}). Nothing has been published.`); void loadDrafts(); }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not save the draft");
+    } finally { setBusy(null); }
   }
 
-  function clearDraft() {
-    setDraftId(null);
-    setServerDraftId(null);
-    setName("");
-    setObjective("leads");
-    setPlatforms(["facebook", "instagram"]);
-    setLanguage("en");
-    setLocation("");
-    setAgeMin(AGE_MIN_FLOOR);
-    setAgeMax(AGE_MAX_CEILING);
-    setHeadline("");
-    setBody("");
-    setCta("Learn more");
-    setImage(null);
-    setNotice(null);
-    setError(null);
-  }
-
-  /**
-   * Phase 3: the studio no longer publishes directly. It saves the campaign as a server-side draft, validates it and
-   * submits it for approval; publishing happens from Campaign approvals after a recorded approval.
-   */
   async function sendForApproval() {
-    setError(null);
-    setNotice(null);
-    setValidationErrors([]);
-    if (!client) {
-      setError("Choose a client before sending a campaign for approval.");
-      return;
-    }
-    if (!canPublish) {
-      setError(metaReady
-        ? "Publishing currently supports Facebook, Instagram, and WhatsApp Ads only. Deselect other channels."
-        : "Connect Meta Business with at least one ad account under Channels first.");
-      return;
-    }
-    const budgetMinor = Math.round(Number(dailyBudget) * 100);
-    if (!Number.isFinite(budgetMinor) || budgetMinor < 100) {
-      setError("Enter a daily budget of at least ₹1.");
-      return;
-    }
-    setPublishBusy(true);
+    setBusy("send"); setError(null); setNotice(null); setServerErrors([]);
     try {
-      const config: CampaignConfig = {
-        ad_account_id: selectedAdAccountId,
-        name: name.trim(),
-        objective,
-        platforms: metaPlatforms,
-        location: location.trim(),
-        age_min: clampAge(ageMin, AGE_MIN_FLOOR),
-        age_max: clampAge(ageMax, AGE_MAX_CEILING),
-        daily_budget_minor: budgetMinor,
-        headline: headline.trim(),
-        primary_text: body.trim(),
-        cta: CTA_TYPES[cta] ?? "LEARN_MORE",
-        destination_url: destinationUrl.trim() || null,
-        page_id: selectedPageId || null,
-      };
-      let created: ExecutionDetail | null = null;
-      if (serverDraftId) {
-        try {
-          created = await updateExecution(serverDraftId, config);
-        } catch (err) {
-          // Already submitted, approved or published: start a new draft instead of changing that one.
-          if (!(err instanceof ApiError && (err.status === 409 || err.status === 404))) throw err;
-        }
-      }
-      created ??= await createExecution(client.id, config, submitKey);
-      const id = created.execution.id;
-      setServerDraftId(id);
-      setSubmittedId(id);
-      if (created.execution.status === "PENDING_APPROVAL") {
-        setNotice("Already sent for approval. Nothing has been published.");
-        return;
-      }
-      const report = await validateExecution(id);
+      const saved = await persist();
+      if (!saved) return;
+      if (saved.execution.status === "PENDING_APPROVAL") { setNotice("Already waiting for approval."); return; }
+      const report = await validateExecution(saved.execution.id);
       if (!report.valid) {
-        setValidationErrors(report.errors.map((issue) => issue.message));
-        setNotice("Saved as a draft in Campex. Fix the issues below, then send it again.");
+        setServerErrors(report.errors.map((i) => i.message));
+        setNotice("Saved as a draft. Fix the issues Campex found, then send again.");
         return;
       }
-      await submitExecution(id);
-      setNotice("Sent for approval. Nothing has been published: an approver publishes it as a paused campaign from Campaign approvals.");
+      const submitted = await submitExecution(saved.execution.id);
+      setDraftStatus(submitted.execution.status);
+      setNotice("Sent for approval. An approver publishes it as a paused campaign; nothing is live yet.");
+      void loadDrafts();
     } catch (err) {
-      setError(err instanceof ApiError || err instanceof Error ? err.message : "Could not send for approval");
-    } finally {
-      setPublishBusy(false);
+      setError(err instanceof Error ? err.message : "Could not send for approval");
+    } finally { setBusy(null); }
+  }
+
+  async function openDraft(id: string) {
+    setError(null); setNotice(null); setServerErrors([]);
+    try {
+      const d = await getExecution(id);
+      const c = d.config;
+      const url = c.destination_url ?? "";
+      setForm({
+        name: c.name, objective: c.objective, adAccountId: c.ad_account_id, pageId: c.page_id ?? "", location: c.location,
+        ageMin: c.age_min, ageMax: c.age_max, placements: c.platforms.filter((p): p is Placement => ["facebook", "instagram", "whatsapp_ads"].includes(p)),
+        language: form.language, dailyBudget: String(Math.round(c.daily_budget_minor / 100)), headline: c.headline, body: c.primary_text,
+        description: c.description ?? "", cta: c.cta, url, utm: false, creativeId: c.creative_asset_id ?? null,
+        creativeVersion: c.creative_version ?? null, creativeImageId: null,
+      });
+      if (c.creative_asset_id) {
+        getCreative(c.creative_asset_id).then((cr) => {
+          const v = cr.versions.find((x) => x.version === c.creative_version);
+          setForm((f) => ({ ...f, creativeImageId: v?.image_id ?? null }));
+        }).catch(() => undefined);
+      }
+      setDraftId(id); setDraftStatus(d.execution.status); setDirty(false); setStep("goal");
+      setNotice(`Editing “${c.name}” (version ${d.execution.config_version}).`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not open the draft");
     }
   }
+
+  function startFresh() {
+    setForm((f) => ({ ...blankForm(), adAccountId: f.adAccountId, pageId: f.pageId }));
+    setDraftId(null); setDraftStatus(null); setDirty(false); setImage(null); setStep("goal");
+    setNotice(null); setError(null); setServerErrors([]); setSaveKey(crypto.randomUUID());
+  }
+
+  const idx = STEPS.findIndex((s) => s.id === step);
+  const go = (delta: number) => setStep(STEPS[Math.min(STEPS.length - 1, Math.max(0, idx + delta))].id);
+  const statusChip = draftStatus === "PENDING_APPROVAL" ? "Awaiting approval" : draftStatus === "APPROVED" ? "Approved"
+    : draftId ? (dirty ? "Unsaved changes" : "Draft saved") : (dirty ? "Not saved" : "New campaign");
 
   return (
-    <div className="campaign-page">
-      <section className="campaign-hero">
-        <div>
+    <div className="studio">
+      <header className="studio-head surface-card">
+        <div className="studio-title">
           <p className="eyebrow">Campaign studio · {client?.name ?? "Select a client"}</p>
-          <h2>One campaign. Every channel.</h2>
-          <p>Draft your message once, tailor the preview, and keep each channel’s requirements in view.</p>
-        </div>
-        <span className="draft-status"><i /> Draft workspace</span>
-      </section>
-
-      <div className="campaign-layout">
-        <div className="campaign-main">
-          <section className="surface-card">
-            <div className="section-title-row">
-              <div>
-                <p className="step-label">01 · SET UP</p>
-                <h3>Campaign details</h3>
-              </div>
-              {draftId && <span className="saved-chip">Editing saved draft</span>}
-            </div>
-            <div className="form-two-col">
-              <label className="form-field">
-                <span>Campaign name</span>
-                <input value={name} onChange={(event) => setName(event.target.value)} maxLength={160} placeholder="e.g. Vijayawada summer launch" />
-              </label>
-              <label className="form-field">
-                <span>Objective</span>
-                <select value={objective} onChange={(event) => setObjective(event.target.value as Objective)}>
-                  <option value="leads">Generate leads</option>
-                  <option value="traffic">Drive traffic</option>
-                  <option value="sales">Drive sales</option>
-                  <option value="awareness">Build awareness</option>
-                </select>
-              </label>
-            </div>
-            <div className="section-title-row compact-title">
-              <div>
-                <p className="step-label">02 · DISTRIBUTION</p>
-                <h3>Choose channels</h3>
-              </div>
-              <span className="muted-label">{platforms.length} selected</span>
-            </div>
-            <div className="channel-grid">
-              {CHANNELS.map((channel) => {
-                const selected = platforms.includes(channel.id);
-                return (
-                  <button
-                    key={channel.id}
-                    type="button"
-                    className={`channel-option${selected ? " selected" : ""}`}
-                    aria-pressed={selected}
-                    onClick={() => togglePlatform(channel.id)}
-                  >
-                    <span className={`channel-mark ${channel.color}`}>{channel.mark}</span>
-                    <span className="channel-info"><strong>{channel.label}</strong><small>{channel.detail}</small></span>
-                    <span className="channel-check" aria-hidden="true">{selected ? "✓" : "+"}</span>
-                  </button>
-                );
-              })}
-            </div>
-            <div className="section-title-row compact-title">
-              <div>
-                <p className="step-label">02B · AUDIENCE</p>
-                <h3>Location and age</h3>
-              </div>
-              <span className="muted-label">{ageMin}–{ageMax} yrs</span>
-            </div>
-            <div className="form-two-col targeting-grid">
-              <label className="form-field">
-                <span>Target location</span>
-                <input
-                  value={location}
-                  onChange={(event) => setLocation(event.target.value)}
-                  maxLength={160}
-                  placeholder="e.g. Vijayawada, Andhra Pradesh"
-                />
-              </label>
-              <div className="age-range-fields">
-                <label className="form-field">
-                  <span>Min age</span>
-                  <input
-                    type="number"
-                    min={AGE_MIN_FLOOR}
-                    max={AGE_MAX_CEILING}
-                    value={ageMin}
-                    onChange={(event) => setAgeMin(clampAge(Number(event.target.value), AGE_MIN_FLOOR))}
-                  />
-                </label>
-                <label className="form-field">
-                  <span>Max age</span>
-                  <input
-                    type="number"
-                    min={AGE_MIN_FLOOR}
-                    max={AGE_MAX_CEILING}
-                    value={ageMax}
-                    onChange={(event) => setAgeMax(clampAge(Number(event.target.value), AGE_MAX_CEILING))}
-                  />
-                </label>
-              </div>
-            </div>
-            <p className="targeting-note">Audience targeting is applied when you publish. New campaigns stay paused until you activate them in Ads Manager.</p>
-            <div className="form-two-col targeting-grid" style={{ marginTop: 12 }}>
-              <label className="form-field">
-                <span>Daily budget (₹)</span>
-                <input type="number" min={1} step={1} value={dailyBudget} onChange={(event) => setDailyBudget(event.target.value)} />
-              </label>
-              <label className="form-field">
-                <span>Destination URL <small>required for traffic and sales</small></span>
-                <input type="url" placeholder="https://" value={destinationUrl} onChange={(event) => setDestinationUrl(event.target.value)} />
-              </label>
-            </div>
-            {metaReady && (
-              <div className="form-two-col targeting-grid" style={{ marginTop: 12 }}>
-                <label className="form-field">
-                  <span>Ad account</span>
-                  <select value={selectedAdAccountId} onChange={(event) => setSelectedAdAccountId(event.target.value)}>
-                    {(metaConnection?.ad_accounts ?? []).map((account) => (
-                      <option key={account.id} value={account.id}>
-                        {account.name}{account.currency ? ` · ${account.currency}` : ""}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="form-field">
-                  <span>Facebook Page</span>
-                  <select value={selectedPageId} onChange={(event) => setSelectedPageId(event.target.value)}>
-                    {(metaConnection?.pages ?? []).length === 0 && <option value="">No Pages connected</option>}
-                    {(metaConnection?.pages ?? []).map((page) => (
-                      <option key={page.id} value={page.id}>{page.name}</option>
-                    ))}
-                  </select>
-                </label>
-              </div>
-            )}
-          </section>
-
-          <section className="surface-card">
-            <div className="section-title-row">
-              <div>
-                <p className="step-label">03 · CREATIVE</p>
-                <h3>Build your ad</h3>
-              </div>
-              <label className="language-switch">
-                <span>Copy language</span>
-                <select value={language} onChange={(event) => setLanguage(event.target.value as LanguageCode)}>
-                  <option value="en">English</option>
-                  <option value="te">తెలుగు</option>
-                </select>
-              </label>
-            </div>
-
-            <div className="creative-grid">
-              <div className="creative-fields">
-                <label className="form-field">
-                  <span>Headline <small>{headline.length}/80</small></span>
-                  <input value={headline} onChange={(event) => setHeadline(event.target.value)} maxLength={80} placeholder="Lead with one clear benefit" />
-                </label>
-                <label className="form-field">
-                  <span>Primary text <small>{body.length}/1500</small></span>
-                  <textarea value={body} onChange={(event) => setBody(event.target.value)} maxLength={1500} rows={7} placeholder="Describe the offer using verified details only." />
-                </label>
-                <label className="form-field">
-                  <span>Call to action</span>
-                  <select value={cta} onChange={(event) => setCta(event.target.value)}>
-                    <option>Learn more</option>
-                    <option>Send message</option>
-                    <option>Sign up</option>
-                    <option>Contact us</option>
-                  </select>
-                </label>
-              </div>
-              <div className="asset-box">
-                <div className="asset-heading"><strong>Campaign image</strong><span>Optional · up to 10 MB</span></div>
-                <label className={`upload-zone${imageUrl ? " has-image" : ""}`}>
-                  {imageUrl ? <img src={imageUrl} alt="Campaign asset preview" /> : <span className="upload-symbol">＋</span>}
-                  <span>{image?.name ?? "Choose an image"}</span>
-                  <small>JPG, PNG or WebP</small>
-                  <input type="file" accept="image/*" onChange={chooseImage} />
-                </label>
-                {imageError && <p className="inline-error" role="alert">{imageError}</p>}
-                {image && <button type="button" className="text-button" onClick={() => setImage(null)}>Remove image</button>}
-                {draftId && !image && drafts.find((draft) => draft.id === draftId)?.imageName && (
-                  <p className="file-note">Saved draft had “{drafts.find((draft) => draft.id === draftId)?.imageName}”. Choose it again to preview.</p>
-                )}
-              </div>
-            </div>
-
-            <div className="section-title-row compact-title">
-              <div><p className="step-label">04 · REVIEW</p><h3>Channel preview</h3></div>
-              <div className="preview-tabs" role="tablist" aria-label="Channel preview">
-                {CHANNELS.filter((channel) => platforms.includes(channel.id)).map((channel) => (
-                  <button key={channel.id} type="button" role="tab" aria-selected={previewPlatform === channel.id}
-                    onClick={() => setPreviewPlatform(channel.id)}>{channel.label}</button>
-                ))}
-              </div>
-            </div>
-            <div className="ad-preview">
-              <div className="preview-account"><span className={`channel-mark ${CHANNELS.find((c) => c.id === previewPlatform)?.color ?? "facebook"}`}>{CHANNELS.find((c) => c.id === previewPlatform)?.mark}</span><span><strong>{client?.name ?? "Your business"}</strong><small>Sponsored · Preview only</small></span><span className="preview-menu">···</span></div>
-              {imageUrl ? <img className="preview-image" src={imageUrl} alt="Selected campaign creative" /> : <div className="preview-placeholder"><span>Image preview</span><small>Your selected creative appears here</small></div>}
-              <div className="preview-copy">
-                <strong>{headline || "Your headline will appear here"}</strong>
-                <p>{body || "Your primary ad text will appear here. Keep the offer clear and factual."}</p>
-                <button type="button" disabled>{cta}</button>
-              </div>
-            </div>
-            <p className="preview-disclaimer">Preview only. Final layouts, media limits and placement rules vary by channel.</p>
-          </section>
-
-          {error && <p className="notice error" role="alert">{error}</p>}
-          {notice && <p className="notice success" role="status">{notice}</p>}
-          {validationErrors.length > 0 && (
-            <ul className="notice error validation-list" role="alert">
-              {validationErrors.map((message) => <li key={message}>{message}</li>)}
-            </ul>
-          )}
-          {submittedId && onOpenApprovals && (
-            <p className="notice success" role="status">
-              <button type="button" className="text-button" onClick={() => onOpenApprovals(submittedId)}>Open in Campaign approvals →</button>
-            </p>
-          )}
-          <div className="campaign-actions">
-            <button type="button" className="secondary-button" onClick={clearDraft}>Start fresh</button>
-            <button type="button" className="secondary-button" onClick={saveDraft}>Save draft</button>
-            <button
-              type="button"
-              className="primary-button"
-              disabled={publishBusy || metaLoading || !canPublish}
-              title={canPublish ? "Save in Campex and request approval" : "Connect Meta Business with an ad account, and select only Meta channels"}
-              onClick={() => void sendForApproval()}
-            >
-              {publishBusy ? "Sending…" : "Send for approval"}
-              {!publishBusy && <span>→</span>}
-            </button>
-          </div>
-          <div className="publish-note">
-            <span className="lock-icon">{metaReady ? "✓" : "◈"}</span>
-            {metaLoading ? (
-              <p>Checking Meta Business connection…</p>
-            ) : metaReady ? (
-              <p>
-                <strong>Meta Business connected.</strong>
-                {" "}
-                {unsupportedSelected
-                  ? "Deselect Google Ads or WhatsApp Business messaging to enable Publish (Meta channels only)."
-                  : "An approver publishes it as a paused campaign. Nothing reaches Meta without a recorded approval."}
-              </p>
-            ) : (
-              <p><strong>Meta Business is not connected.</strong> Connect an ad account under Channels before you publish.</p>
-            )}
-            <button type="button" className="text-button" onClick={onOpenChannels}>View channel setup</button>
+          <input className="studio-name" aria-label="Campaign name" value={form.name} maxLength={140}
+            placeholder="Untitled campaign" onChange={(e) => set("name", e.target.value)} />
+          <div className="studio-meta">
+            <span className={`pill tone-${draftStatus === "PENDING_APPROVAL" ? "warn" : dirty ? "neutral" : draftId ? "good" : "neutral"}`}>{statusChip}</span>
+            <span>{OBJECTIVES[form.objective].label}</span><span>·</span><span>{budget ? `${inr(budget)}/day` : "No budget"}</span>
+            {account && <><span>·</span><span>{account.name}</span></>}
           </div>
         </div>
+        <div className="studio-head-actions">
+          <button type="button" className="text-button" onClick={startFresh}>New</button>
+          <button type="button" className="secondary-button" disabled={busy !== null || !client} onClick={() => void saveDraft()}>{busy === "save" ? "Saving…" : "Save draft"}</button>
+          <button type="button" className="primary-button" disabled={busy !== null || !client || !metaReady || blocking.length > 0}
+            title={blocking.length ? `${blocking.length} item(s) to fix first` : undefined} onClick={() => void sendForApproval()}>
+            {busy === "send" ? "Sending…" : "Send for approval"}</button>
+        </div>
+      </header>
 
-        <aside className="campaign-aside">
-          <section className="assistant-card">
-            <div className="assistant-head">
-              <span className="assistant-spark">✦</span>
-              <div><p className="step-label">AI CAMPAIGN ASSISTANT</p><h3>Copy and performance</h3></div>
-              <span className="ai-mode">Secure</span>
-            </div>
-            <p className="assistant-intro">Improve copy or ask about connected Meta performance. Meta insights are read-only here; campaign changes require a separate confirmation.</p>
-            <div className="assistant-messages" aria-live="polite">
-              {messages.map((message, index) => (
-                <div key={`${message.role}-${index}`} className={`chat-message ${message.role}`}>
-                  <span>{message.role === "assistant" ? "AI" : "You"}</span>
-                  <p>{message.content}</p>
-                  {message.role === "assistant" && message.suggestedCopy && (
-                    <button type="button" className="text-button" onClick={() => applySuggestion(message.suggestedCopy ?? "")}>Use as primary text</button>
-                  )}
-                </div>
-              ))}
-              {aiBusy && <p className="thinking"><i /> Thinking about your copy…</p>}
-            </div>
-            <form className="assistant-compose" onSubmit={(event) => void askAssistant(event)}>
-              <textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} rows={3} maxLength={2000}
-                placeholder="e.g. Summarize this for Telugu-speaking families, or audit my last 14 days of Meta ads" />
-              <div className="assistant-compose-foot"><small>{selectedNames.length ? selectedNames.join(" · ") : "Choose channels first"}</small>
-                <button type="submit" className="send-button" disabled={aiBusy || !prompt.trim() || platforms.length === 0} aria-label="Send prompt">↑</button>
+      {!client && <p className="notice warn-notice">Choose a client in the top bar to build a campaign for them.</p>}
+      {!metaLoading && !metaReady && (
+        <p className="notice warn-notice">Meta Business isn't connected with an ad account. <button type="button" className="text-button" onClick={onOpenChannels}>Connect it under Channels</button></p>
+      )}
+      {error && <p className="notice error" role="alert">{error}</p>}
+      {notice && <p className="notice success-notice" role="status">{notice}
+        {draftId && onOpenApprovals && draftStatus && draftStatus !== "DRAFT" && <> <button type="button" className="text-button" onClick={() => onOpenApprovals(draftId)}>Open in Campaign approvals →</button></>}</p>}
+      {serverErrors.length > 0 && <ul className="notice error validation-list" role="alert">{serverErrors.map((m) => <li key={m}>{m}</li>)}</ul>}
+
+      <div className="studio-layout">
+        <nav className="studio-steps" aria-label="Campaign steps">
+          {STEPS.map((s, i) => {
+            const done = stepDone(s.id);
+            const errs = errorsFor(s.id).length;
+            return (
+              <button key={s.id} type="button" className={`studio-step${step === s.id ? " active" : ""}${done ? " done" : ""}`}
+                aria-current={step === s.id ? "step" : undefined} onClick={() => setStep(s.id)}>
+                <span className="studio-step-dot">{done ? "✓" : i + 1}</span>
+                <span><strong>{s.label}</strong><small>{s.id === "review" ? (blocking.length ? `${blocking.length} to fix` : "Ready to send") : errs ? `${errs} to fix` : s.hint}</small></span>
+              </button>
+            );
+          })}
+          <DraftList drafts={drafts} activeId={draftId} onOpen={(id) => void openDraft(id)} onOpenApprovals={onOpenApprovals} />
+        </nav>
+
+        <main className="studio-main surface-card">
+          {step === "goal" && (
+            <Step title="What should this campaign achieve?" sub="Meta optimizes delivery for the objective you choose.">
+              <div className="objective-grid" role="radiogroup" aria-label="Objective">
+                {(Object.keys(OBJECTIVES) as Objective[]).map((o) => (
+                  <button key={o} type="button" role="radio" aria-checked={form.objective === o}
+                    className={`objective-card${form.objective === o ? " selected" : ""}`} onClick={() => set("objective", o)}>
+                    <span className="objective-icon">{OBJECTIVES[o].icon}</span><strong>{OBJECTIVES[o].label}</strong>
+                    <small>{OBJECTIVES[o].bestFor}</small>
+                  </button>))}
               </div>
-            </form>
-            <p className="ai-privacy">Use only verified property facts. Review every suggestion before publishing.</p>
-          </section>
+              <dl className="facts objective-facts">
+                <div><dt>Meta optimizes for</dt><dd>{OBJECTIVES[form.objective].optimizes}</dd></div>
+                <div><dt>Judge it by</dt><dd>{OBJECTIVES[form.objective].measure}</dd></div>
+              </dl>
+              <div className="form-grid-2">
+                <label className="form-field"><span>Ad account</span>
+                  <select value={form.adAccountId} onChange={(e) => set("adAccountId", e.target.value)} disabled={!metaReady}>
+                    {!metaReady && <option value="">Connect Meta first</option>}
+                    {(meta?.ad_accounts ?? []).map((a) => <option key={a.id} value={a.id}>{a.name}{a.currency ? ` · ${a.currency}` : ""}</option>)}
+                  </select></label>
+                <label className="form-field"><span>Facebook Page <small>the ad runs as this Page</small></span>
+                  <select value={form.pageId} onChange={(e) => set("pageId", e.target.value)} disabled={!metaReady}>
+                    {(meta?.pages ?? []).length === 0 && <option value="">No Pages connected</option>}
+                    {(meta?.pages ?? []).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                  </select></label>
+              </div>
+              <div className="name-row">
+                <label className="form-field"><span>Campaign name <small>client | objective | location | month keeps reports tidy</small></span>
+                  <input value={form.name} maxLength={140} onChange={(e) => set("name", e.target.value)} placeholder="Green Fields | Leads | Guntur | Nov 26" /></label>
+                <button type="button" className="secondary-button" onClick={suggestName}>Suggest name</button>
+              </div>
+            </Step>
+          )}
 
-          <section className="surface-card drafts-card">
-            <div className="section-title-row"><div><p className="step-label">WORKSPACE</p><h3>Recent drafts</h3></div><span className="draft-count">{drafts.length}</span></div>
-            {drafts.length === 0 ? <p className="empty-state">Saved drafts in this browser will appear here.</p> : (
-              <ul className="draft-list">
-                {drafts.slice(0, 5).map((draft) => (
-                  <li key={draft.id}>
-                    <button type="button" className="draft-open" onClick={() => loadDraft(draft)}>
-                      <span className="draft-thumb">{draft.imageName ? "▧" : "✦"}</span>
-                      <span><strong>{draft.name}</strong><small>{draft.platforms.length} channels · {draft.location || "No location"} · {draft.ageMin}–{draft.ageMax} · {new Date(draft.savedAt).toLocaleDateString()}</small></span>
-                    </button>
-                    <button type="button" className="draft-delete" aria-label={`Delete ${draft.name}`} onClick={() => setDrafts((current) => current.filter((item) => item.id !== draft.id))}>×</button>
-                  </li>
-                ))}
+          {step === "audience" && (
+            <Step title="Who should see it?" sub={`${form.location.trim() || "Location not set"} · ages ${form.ageMin}–${form.ageMax} · ${form.placements.length} placement${form.placements.length === 1 ? "" : "s"}`}>
+              <label className="form-field"><span>Location <small>city, region or country as Meta knows it; Meta confirms it at publish</small></span>
+                <input value={form.location} maxLength={160} onChange={(e) => set("location", e.target.value)} placeholder="Guntur" /></label>
+              <div className="form-field"><span>Age range</span>
+                <div className="age-row">
+                  <input aria-label="Minimum age" type="number" min={AGE_MIN} max={AGE_MAX} value={form.ageMin} onChange={(e) => set("ageMin", clampAge(Number(e.target.value), AGE_MIN))} />
+                  <span>to</span>
+                  <input aria-label="Maximum age" type="number" min={AGE_MIN} max={AGE_MAX} value={form.ageMax} onChange={(e) => set("ageMax", clampAge(Number(e.target.value), AGE_MAX))} />
+                  <div className="preset-chips">{AGE_PRESETS.map(([a, b]) => (
+                    <button key={`${a}-${b}`} type="button" className={`chip${form.ageMin === a && form.ageMax === b ? " active" : ""}`}
+                      onClick={() => { set("ageMin", a); set("ageMax", b); }}>{a}–{b}{b === 65 ? "+" : ""}</button>))}</div>
+                </div></div>
+              <fieldset className="placement-grid"><legend>Placements</legend>
+                {PLACEMENTS.map((p) => {
+                  const on = form.placements.includes(p.id);
+                  return <button key={p.id} type="button" aria-pressed={on} className={`channel-option${on ? " selected" : ""}`}
+                    onClick={() => set("placements", on ? form.placements.filter((x) => x !== p.id) : [...form.placements, p.id])}>
+                    <span className={`channel-mark ${p.color}`}>{p.mark}</span>
+                    <span className="channel-info"><strong>{p.label}</strong><small>{p.detail}</small></span>
+                    <span className="channel-check" aria-hidden="true">{on ? "✓" : "+"}</span></button>;
+                })}
+              </fieldset>
+              <label className="form-field narrow"><span>Copy language</span>
+                <select value={form.language} onChange={(e) => set("language", e.target.value as LanguageCode)}><option value="en">English</option><option value="te">తెలుగు</option></select></label>
+              <p className="targeting-note">Detailed interests, custom audiences and the housing special ad category are set in Ads Manager for now. Review them there before activating.</p>
+            </Step>
+          )}
+
+          {step === "budget" && (
+            <Step title="How much should it spend?" sub="Daily budget on the ad set. Campaigns stay paused until someone activates them.">
+              <div className="budget-row">
+                <label className="form-field"><span>Daily budget (₹)</span>
+                  <input className="budget-input" type="number" min={1} step={50} value={form.dailyBudget} onChange={(e) => set("dailyBudget", e.target.value)} /></label>
+                <div className="preset-chips">{BUDGET_PRESETS.map((b) => (
+                  <button key={b} type="button" className={`chip${budget === b ? " active" : ""}`} onClick={() => set("dailyBudget", String(b))}>{inr(b)}</button>))}</div>
+              </div>
+              <div className="forecast">
+                <div><span>Per week</span><strong>{inr(budget * 7)}</strong></div>
+                <div><span>Per 30 days</span><strong>{inr(budget * 30)}</strong></div>
+                <div><span>Client daily limit</span><strong>{policy?.daily_spend_limit != null ? inr(policy.daily_spend_limit) : "Not set"}</strong></div>
+                {policy?.target_cost_per_qualified_lead ? (
+                  <div><span>At target cost per qualified lead</span>
+                    <strong>≈ {Math.floor((budget * 30) / policy.target_cost_per_qualified_lead)} / month</strong>
+                    <small>Estimate from the client's {inr(policy.target_cost_per_qualified_lead)} target, not a forecast from Meta.</small></div>
+                ) : <div><span>Qualified-lead estimate</span><strong>—</strong><small>Set a target cost per qualified lead in Performance AI → Budget.</small></div>}
+              </div>
+              {policy?.daily_spend_limit != null && budget > policy.daily_spend_limit && <p className="notice error">Above the client's daily spend limit; approval will be refused.</p>}
+              <p className="targeting-note">Schedule: runs continuously from activation. Start and end dates aren't sent to Meta yet; pause it from Optimization actions when it should stop.</p>
+            </Step>
+          )}
+
+          {step === "ad" && (
+            <Step title="Build the ad" sub="Use an approved creative so the copy has been reviewed, or write it here.">
+              <label className="form-field"><span>Approved creative <small>from Creative Studio · locks the copy to the approved version</small></span>
+                <select value={form.creativeId ?? ""} onChange={(e) => void attachCreative(e.target.value)}>
+                  <option value="">None, write copy here</option>
+                  {creatives.map((c) => <option key={c.id} value={c.id}>{c.name} · v{c.approved_version}</option>)}
+                </select></label>
+              {!form.creativeId && (
+                <label className="form-field"><span>Image for preview <small>preview only; save artwork in Creative Studio to use it in a campaign</small></span>
+                  <input type="file" accept="image/png,image/jpeg,image/webp" onChange={(e: ChangeEvent<HTMLInputElement>) => {
+                    const file = e.target.files?.[0] ?? null;
+                    setImage(file && file.type.startsWith("image/") && file.size <= 10 * 1024 * 1024 ? file : null);
+                  }} /></label>
+              )}
+              <label className="form-field"><span>Headline <small className={form.headline.length > 40 ? "warn-text" : undefined}>{form.headline.length}/40 recommended</small></span>
+                <input value={form.headline} maxLength={80} readOnly={Boolean(form.creativeId)} onChange={(e) => set("headline", e.target.value)} placeholder="One clear benefit" /></label>
+              <label className="form-field"><span>Primary text <small className={form.body.length > 125 ? "warn-text" : undefined}>{form.body.length}/125 before “See more”</small></span>
+                <textarea rows={5} maxLength={1500} readOnly={Boolean(form.creativeId)} value={form.body} onChange={(e) => set("body", e.target.value)} placeholder="Verified details only: no invented prices, approvals or returns." /></label>
+              <div className="form-grid-2">
+                <label className="form-field"><span>Description <small>optional</small></span>
+                  <input value={form.description} maxLength={255} readOnly={Boolean(form.creativeId)} onChange={(e) => set("description", e.target.value)} /></label>
+                <label className="form-field"><span>Call to action</span>
+                  <select value={form.cta} onChange={(e) => set("cta", e.target.value)}>{CTAS.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}</select></label>
+              </div>
+              <label className="form-field"><span>Destination URL <small>{form.objective === "traffic" || form.objective === "sales" ? "required" : "optional for lead and awareness campaigns"}</small></span>
+                <input type="url" value={form.url} placeholder="https://greenfields.example/villas" onChange={(e) => set("url", e.target.value)} /></label>
+              <label className="check-line"><input type="checkbox" checked={form.utm} onChange={(e) => set("utm", e.target.checked)} />Add UTM tags so CRM attribution recognises this campaign</label>
+              {finalUrl && form.utm && <p className="utm-preview"><span>Final URL</span><code>{finalUrl}</code></p>}
+              {form.creativeId && <p className="targeting-note">Copy is locked to the approved creative. Change it in Creative Studio and approve a new version.</p>}
+            </Step>
+          )}
+
+          {step === "review" && (
+            <Step title="Review before approval" sub="Approvers see exactly this configuration; any later edit cancels their approval.">
+              <ul className="checklist">
+                {STEPS.filter((s) => s.id !== "review").map((s) => {
+                  const list = issues.filter((i) => i.step === s.id);
+                  return <li key={s.id}><button type="button" className="text-button" onClick={() => setStep(s.id)}>{s.label}</button>
+                    {list.length === 0 ? <span className="check-ok">All set</span> : <ul>{list.map((i) => <li key={i.text} className={`issue-${i.level}`}>{i.text}</li>)}</ul>}</li>;
+                })}
               </ul>
-            )}
+              <dl className="facts">
+                <div><dt>Objective</dt><dd>{OBJECTIVES[form.objective].label}</dd></div>
+                <div><dt>Account · Page</dt><dd>{account?.name ?? "—"} · {page?.name ?? "—"}</dd></div>
+                <div><dt>Audience</dt><dd>{form.location || "—"}, {form.ageMin}–{form.ageMax}</dd></div>
+                <div><dt>Placements</dt><dd>{form.placements.map((p) => PLACEMENTS.find((x) => x.id === p)?.label).join(", ") || "—"}</dd></div>
+                <div><dt>Budget</dt><dd>{inr(budget)}/day · {inr(budget * 30)}/30 days</dd></div>
+                <div><dt>Creative</dt><dd>{form.creativeId ? `Approved v${form.creativeVersion}` : "Not reviewed"}</dd></div>
+                <div className="span-2"><dt>Destination</dt><dd className="break">{finalUrl || "—"}</dd></div>
+              </dl>
+              <p className="notice note-info">What happens next: an approver checks it in Campaign approvals and publishes it. Meta receives a <strong>paused</strong> campaign and ad set; the ad is added in Ads Manager, and nothing spends until someone activates it.</p>
+            </Step>
+          )}
+
+          <div className="studio-nav">
+            <button type="button" className="secondary-button" disabled={idx === 0} onClick={() => go(-1)}>Back</button>
+            {step !== "review"
+              ? <button type="button" className="primary-button" onClick={() => go(1)}>Continue</button>
+              : <button type="button" className="primary-button" disabled={busy !== null || !client || !metaReady || blocking.length > 0} onClick={() => void sendForApproval()}>
+                  {busy === "send" ? "Sending…" : "Send for approval"}</button>}
+          </div>
+        </main>
+
+        <aside className="studio-side">
+          <section className="surface-card preview-card">
+            <div className="section-title-row"><h3>Preview</h3>
+              <div className="segmented-tabs" role="tablist" aria-label="Preview placement">
+                {([["fb_feed", "Facebook"], ["ig_feed", "Instagram"], ["story", "Story"]] as [PreviewKind, string][]).map(([k, label]) => (
+                  <button key={k} type="button" role="tab" aria-selected={preview === k} onClick={() => setPreview(k)}>{label}</button>))}
+              </div></div>
+            <AdMock kind={preview} pageName={page?.name ?? client?.name ?? "Your Page"} headline={form.headline} body={form.body}
+              description={form.description} cta={CTAS.find((c) => c.id === form.cta)?.label ?? "Learn more"}
+              domain={(() => { try { return finalUrl ? new URL(finalUrl).hostname : ""; } catch { return ""; } })()}
+              image={form.creativeImageId ? <AuthImage imageId={form.creativeImageId} alt="Approved creative" className="mock-image" />
+                : imageUrl ? <img className="mock-image" src={imageUrl} alt="Preview" /> : <div className="mock-image mock-empty">Image</div>} />
+            <p className="preview-disclaimer">Approximate layout. Meta crops and truncates per placement.</p>
           </section>
+          <section className="surface-card readiness-card" aria-label="Launch readiness">
+            <h3>Launch readiness</h3>
+            <ul>{STEPS.filter((s) => s.id !== "review").map((s) => (
+              <li key={s.id} className={stepDone(s.id) ? "ok" : "todo"}><span>{stepDone(s.id) ? "✓" : "•"}</span>{s.label}
+                {!stepDone(s.id) && <small>{errorsFor(s.id)[0]?.text}</small>}</li>))}</ul>
+            {issues.filter((i) => i.level === "warning").length > 0 && <p className="targeting-note">{issues.filter((i) => i.level === "warning").length} suggestion(s) on the Review step.</p>}
+          </section>
+          <AssistantCard client={client} form={form} onUseCopy={(copy) => { if (!form.creativeId) set("body", copy); }} locked={Boolean(form.creativeId)} />
         </aside>
       </div>
     </div>
+  );
+}
+
+function Step({ title, sub, children }: { title: string; sub: string; children: ReactNode }) {
+  return <section className="studio-step-body"><div><h2>{title}</h2><p className="muted">{sub}</p></div>{children}</section>;
+}
+
+function AdMock({ kind, pageName, headline, body, description, cta, domain, image }: {
+  kind: PreviewKind; pageName: string; headline: string; body: string; description: string; cta: string; domain: string; image: ReactNode;
+}) {
+  if (kind === "story") {
+    return (
+      <div className="mock story">
+        {image}
+        <div className="story-top"><span className="mock-avatar" /><strong>{pageName}</strong><small>Sponsored</small></div>
+        <div className="story-bottom"><p>{body || "Primary text"}</p><span className="story-cta">⌃ {cta}</span></div>
+      </div>
+    );
+  }
+  const ig = kind === "ig_feed";
+  return (
+    <div className={`mock feed${ig ? " ig" : ""}`}>
+      <div className="mock-head"><span className="mock-avatar" /><span><strong>{ig ? pageName.toLowerCase().replace(/\s+/g, "") : pageName}</strong><small>Sponsored</small></span></div>
+      {!ig && <p className="mock-text">{body || "Primary text appears here."}</p>}
+      {image}
+      <div className="mock-foot">
+        {ig ? <span className="mock-cta-bar">{cta} ›</span> : <>
+          <span className="mock-link">{domain && <small>{domain.toUpperCase()}</small>}<strong>{headline || "Headline"}</strong>{description && <small>{description}</small>}</span>
+          <span className="mock-cta">{cta}</span></>}
+      </div>
+      {ig && <p className="mock-text"><strong>{pageName.toLowerCase().replace(/\s+/g, "")}</strong> {body || "Primary text appears here."}</p>}
+    </div>
+  );
+}
+
+function DraftList({ drafts, activeId, onOpen, onOpenApprovals }: {
+  drafts: ExecutionSummary[]; activeId: string | null; onOpen: (id: string) => void; onOpenApprovals?: (id?: string) => void;
+}) {
+  const editable = drafts.filter((d) => d.status === "DRAFT" || d.status === "READY_FOR_REVIEW");
+  const waiting = drafts.filter((d) => d.status === "PENDING_APPROVAL");
+  const legacy = (() => {
+    try {
+      for (const key of LEGACY_KEYS) {
+        const v: unknown = JSON.parse(localStorage.getItem(key) ?? "null");
+        if (Array.isArray(v) && v.length) return v.length;
+      }
+    } catch { /* storage unavailable */ }
+    return 0;
+  })();
+  return (
+    <div className="studio-drafts">
+      <p className="step-label">DRAFTS</p>
+      {editable.length === 0 && waiting.length === 0 && <p className="empty-state">Saved drafts appear here.</p>}
+      {editable.slice(0, 6).map((d) => (
+        <button key={d.id} type="button" className={`draft-link${activeId === d.id ? " active" : ""}`} onClick={() => onOpen(d.id)}>
+          <strong>{d.name}</strong><small>v{d.config_version} · {new Date(d.updated_at).toLocaleDateString("en-IN")}</small></button>))}
+      {waiting.length > 0 && <>
+        <p className="step-label">AWAITING APPROVAL</p>
+        {waiting.slice(0, 4).map((d) => (
+          <button key={d.id} type="button" className="draft-link" onClick={() => onOpenApprovals?.(d.id)}>
+            <strong>{d.name}</strong><small>Open in approvals →</small></button>))}
+      </>}
+      {legacy > 0 && <p className="targeting-note">{legacy} older draft(s) are saved only in this browser and aren't shown here.</p>}
+    </div>
+  );
+}
+
+function AssistantCard({ client, form, onUseCopy, locked }: {
+  client?: Client; form: StudioForm; onUseCopy: (copy: string) => void; locked: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const [prompt, setPrompt] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [messages, setMessages] = useState<AssistantMessage[]>([]);
+  async function ask(e: FormEvent) {
+    e.preventDefault();
+    const q = prompt.trim();
+    if (!q || busy) return;
+    setMessages((m) => [...m, { role: "user", content: q }]);
+    setPrompt(""); setBusy(true);
+    try {
+      const r = await assistCampaign({
+        campaign_name: form.name.trim() || "Untitled campaign", objective: form.objective,
+        platforms: form.placements as CampaignPlatform[], language: form.language, prompt: q,
+        content: [form.headline.trim(), form.body.trim()].filter(Boolean).join("\n\n") || "No draft copy supplied.",
+        ad_account_id: form.adAccountId || undefined, client_id: client?.id, client_name: client?.name,
+      });
+      setMessages((m) => [...m, { role: "assistant", content: r.reply, suggestedCopy: r.suggested_copy ?? undefined }]);
+    } catch (err) {
+      setMessages((m) => [...m, { role: "assistant", content: `I couldn't complete that: ${err instanceof Error ? err.message : "assistant unavailable"}` }]);
+    } finally { setBusy(false); }
+  }
+  return (
+    <section className="surface-card assistant-mini">
+      <button type="button" className="assistant-toggle" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
+        <span className="assistant-spark">✦</span><span><strong>AI assistant</strong><small>Improve copy or ask about Meta results (read-only)</small></span><span aria-hidden="true">{open ? "−" : "+"}</span></button>
+      {open && <>
+        <div className="assistant-messages" aria-live="polite">
+          {messages.length === 0 && <p className="muted">Try: “Shorten this for Instagram” or “Which of my campaigns had the lowest cost per lead last month?”</p>}
+          {messages.map((m, i) => (
+            <div key={i} className={`chat-message ${m.role}`}><span>{m.role === "assistant" ? "AI" : "You"}</span><p>{m.content}</p>
+              {m.suggestedCopy && !locked && <button type="button" className="text-button" onClick={() => onUseCopy(m.suggestedCopy ?? "")}>Use as primary text</button>}</div>))}
+          {busy && <p className="thinking"><i /> Thinking…</p>}
+        </div>
+        <form className="assistant-compose" onSubmit={(e) => void ask(e)}>
+          <textarea rows={2} maxLength={2000} value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="Ask the assistant" />
+          <div className="assistant-compose-foot"><small>Verify every fact before using a suggestion.</small>
+            <button type="submit" className="send-button" disabled={busy || !prompt.trim()} aria-label="Send prompt">↑</button></div>
+        </form>
+      </>}
+    </section>
   );
 }
