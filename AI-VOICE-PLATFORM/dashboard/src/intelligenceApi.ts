@@ -35,6 +35,7 @@ export const updateRecommendation = (id: string, status: "accepted" | "rejected"
   request<{ recommendation: Recommendation; message: string }>(`/api/recommendations/${id}/status`, body("PATCH", { status, note }));
 
 export const getBudgetAnalysis = (clientId: string, r: DateRange) => request<BudgetAnalysis>(`${c(clientId)}/budget/analysis${q({ ...r })}`);
+export const getBudgetPolicy = (clientId: string) => request<BudgetPolicy>(`${c(clientId)}/budget/policy`);
 export const saveBudgetPolicy = (clientId: string, policy: Partial<BudgetPolicy>) =>
   request<BudgetPolicy>(`${c(clientId)}/budget/policy`, body("PUT", policy));
 
