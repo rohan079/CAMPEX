@@ -118,6 +118,18 @@ class MetaCampaignPublishRequest(BaseModel):
     confirmed: bool
 
 
+class MetaCampaignLookupRequest(BaseModel):
+    """Find campaigns Campex created, by the publish tag embedded in the campaign name."""
+
+    ad_account_id: str = Field(min_length=1, max_length=64)
+    name_contains: str = Field(min_length=4, max_length=100)
+
+
+class MetaCampaignStatusRequest(BaseModel):
+    ad_account_id: str = Field(min_length=1, max_length=64)
+    campaign_id: str = Field(min_length=1, max_length=64, pattern=r"^[0-9]+$")
+
+
 class ProviderEvent(BaseModel):
     """A status callback from a SIP gateway or provider, in the same vocabulary as OpenAI's sideband events."""
 

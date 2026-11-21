@@ -232,6 +232,27 @@ def create_meta_ads_mcp(
         return rows
 
     @mcp.tool
+    async def find_campaigns_by_name(
+        ad_account_id: str,
+        name_contains: str,
+        access_token: str,
+        limit: int = 25,
+    ) -> list[dict[str, Any]]:
+        """Read-only: campaigns in one ad account whose name contains a fragment (used to reconcile publishes)."""
+        fragment = name_contains.strip()
+        if len(fragment) < 4 or len(fragment) > 100:
+            raise MetaAdsToolError("Name fragment must be 4-100 characters.")
+        account = graph.account_id(ad_account_id)
+        rows = await graph.list_edge(
+            f"{account}/campaigns", access_token,
+            "id,name,objective,status,effective_status,created_time",
+            limit,
+            {"filtering": json.dumps([{"field": "name", "operator": "CONTAIN", "value": fragment}])},
+        )
+        # Meta's CONTAIN filter is case-insensitive; keep only exact fragment matches.
+        return [row for row in rows if fragment in str(row.get("name", ""))]
+
+    @mcp.tool
     async def get_campaign_details(campaign_id: str, access_token: str) -> dict[str, Any]:
         """Get campaign status, objective, budgets, and dates."""
         return await graph.request(

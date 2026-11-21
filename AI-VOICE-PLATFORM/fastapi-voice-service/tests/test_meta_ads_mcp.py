@@ -221,3 +221,27 @@ async def test_ad_performance_reports_exact_name_misses():
     data = tool_payload(result)
     assert data["status"] == "not_found"
     assert "exact name" in data["message"]
+
+
+@pytest.mark.asyncio
+async def test_find_campaigns_by_name_filters_server_side_and_exactly():
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["path"] = request.url.path
+        seen["filtering"] = request.url.params.get("filtering")
+        seen["method"] = request.method
+        return httpx.Response(200, json={"data": [
+            {"id": "1", "name": "Villas [cx-abc123def0]", "status": "PAUSED"},
+            {"id": "2", "name": "Villas [CX-ABC123DEF0]", "status": "PAUSED"},
+        ]})
+
+    server = create_meta_ads_mcp(Settings(meta_graph_api_version="v27.0"), httpx.MockTransport(handler))
+    async with Client(server) as client:
+        result = await client.call_tool("find_campaigns_by_name", {
+            "ad_account_id": "act_123", "name_contains": "cx-abc123def0", "access_token": "t"})
+
+    assert seen["method"] == "GET"
+    assert seen["path"].endswith("/act_123/campaigns")
+    assert '"operator": "CONTAIN"' in seen["filtering"]
+    assert [row["id"] for row in tool_payload(result)] == ["1"]
