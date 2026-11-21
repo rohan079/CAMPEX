@@ -13,7 +13,7 @@ Phase 3 is delivered in increments. This document is updated with each one; sect
 | 3 | Creative Studio: AI copy with claim checks, artwork generation/upload, persistent storage, versions, review, attach to campaigns | **built** |
 | 4 | Optimization actions: pause / resume / daily budget, previewed from Meta, approved, applied once, verified | **built** |
 | 5 | Automation rules: spend, CTR decline, cost per lead, delivery issues; levels 1–4 (level 4 off by default) | **built** |
-| 6 | Experiment execution on top of Phase 2 experiments | planned |
+| 6 | Experiment execution: readiness from Meta, approved launch, progress, follow-up only on a reliable winner | **built** |
 
 ---
 
@@ -353,6 +353,33 @@ and notified. No level can raise a budget, resume or activate anything.
 
 FastAPI (service key, read-only): `POST /api/meta/campaigns/statuses`.
 
+## 6d. Experiment execution (increment 6)
+
+Builds on the Phase 2 experiments (design, interim and final statistics, `winner` / `no_reliable_winner` /
+`inconclusive`). Phase 2 endpoints are unchanged; Phase 3 adds an execution layer (migration
+`V20__experiment_execution.sql`: approved creative per variant, `experiment_executions` linking actions).
+
+1. **Readiness** (`GET /api/experiments/{id}/execution`) reads each variant from Meta. Errors block launch: variant
+   outside the client's ad accounts, deleted/archived, disapproved/with issues/pending billing, outside the
+   experiment's campaign, mixed ad/ad set levels, creative tests on ad sets, control and test on the same object, an
+   attached creative that is no longer the approved version. Warnings: different campaigns, no end date, shorter than
+   7 days, minimum sample under 100.
+2. **Launch** (`POST …/launch`, idempotent): if both variants are delivering, measurement starts (Phase 2 start).
+   Otherwise each paused variant gets a **resume** Optimization action that someone approves and applies; calling
+   launch again starts measurement once Meta shows both active. No duplicates are prepared.
+3. **Progress**: days elapsed vs planned and whether the minimum sample is reached, with interim statistics and
+   guidance ("keep it running…"). Completion stays a deliberate user action (Phase 2 `complete`), and the statistics
+   only report a winner when the sample is sufficient and the difference is significant.
+4. **Follow-up** (`POST …/follow-up`): only for `winner` results, prepares (does not apply) a **pause** of the losing
+   variant for approval. With `no_reliable_winner` or `inconclusive` it is refused: nothing is replaced.
+5. Variants can carry an approved creative (`PUT …/variants/{variantId}/creative`), so tested copy is reviewed copy.
+
+| Method | Path | Permission |
+|---|---|---|
+| GET | `/api/experiments/{id}/execution` | READ |
+| PUT | `/api/experiments/{id}/variants/{variantId}/creative` | MANAGE (draft only) |
+| POST | `/api/experiments/{id}/launch` · `/follow-up` | MANAGE |
+
 ## 7. Roles and permissions
 
 Spec roles map onto the existing per-client roles (no schema change needed yet):
@@ -408,3 +435,47 @@ Earlier increments need no new environment variables. Uses the existing `CAMPEX_
 * `CampaignExecutionIntegrationTest` — HTTP + PostgreSQL (Flyway), tenant isolation, viewer cannot publish,
   idempotent create, concurrent publish yields exactly one Meta call. Gated on `CAMPEX_IT_DATABASE_URL`.
 * FastAPI: lookup/status routes with a mocked MCP.
+
+## 11. React screen inventory
+
+| Screen | Where | Increment |
+|---|---|---|
+| Campaign Studio (sends drafts for approval) | Workspace → Campaign studio | 2 |
+| Creative Studio + asset library | Workspace → Creative studio | 3 |
+| Campaign approvals (approval center + execution history) | Workspace → Campaign approvals | 2 |
+| Notification center | Bell in the top bar | 2 |
+| Optimization actions | Measurement → Optimization actions | 4 |
+| “Prepare change in Meta” on recommendations | Measurement → Performance AI → Recommendations | 4 |
+| Automation rules + run history | Measurement → Automation rules | 5 |
+| Experiment execution drawer | Measurement → Performance AI → Experiments → Launch… / Run in Meta | 6 |
+
+All screens use the existing client switcher and role checks; viewers and agents see everything read-only.
+
+## 12. Test results (end of increment 6)
+
+| Suite | Result |
+|---|---|
+| Spring (`mvn test` with `CAMPEX_IT_DATABASE_URL` set) | 221 passed, 0 failed |
+| Dashboard (`npm test`) | 4 node + 54 Vitest passed; `npm run build` OK |
+| FastAPI (`pytest`) | 100 passed; 16 failures pre-date Phase 3 (campaign assistant `owner_email`, TTS preview and similar) and are unchanged |
+
+Meta is mocked in every automated test; no test touches a real ad account.
+
+## 13. Acceptance criteria
+
+| Criterion | Where |
+|---|---|
+| Marketer can create a campaign draft | Campaign Studio / Campaign approvals (§3) |
+| AI generates copy and image concepts | Creative Studio (§6a) |
+| Marketer can preview the final creative | Creative drawer ad preview (§6a) |
+| Configuration is validated | `CampaignValidator` (§4) |
+| An authorized user approves publishing | Approvals bound to config hash (§3) |
+| Campex creates a supported Meta campaign in PAUSED status | Publish (§3) |
+| Protected against duplicate requests | Idempotency key, conditional claim, publish tag reconciliation (§3) |
+| Failures are visible and recoverable | FAILED / unconfirmed states, Reconcile, Retry (§3) |
+| Approved optimization actions execute safely | Optimization actions (§6b) |
+| Automation rules monitor and alert | Automation rules (§6c) |
+| No unapproved AI-driven live change | AI tools are read-only; every write goes through an approved action; level 4 is off by default and pause-only (§6b–6c) |
+| Every action is audited | `audit_events`, step/event tables, approvals (§5, §6b) |
+| Client data stays isolated | `ClientAccessService` on every route; tenant tests |
+| Existing functionality keeps working | Full Spring/dashboard suites; legacy publish route kept |

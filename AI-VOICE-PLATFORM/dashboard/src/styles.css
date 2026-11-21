@@ -1676,3 +1676,14 @@ input[readonly], textarea[readonly] { background: var(--surface-2); color: var(-
 .level-option { display: grid; grid-template-columns: auto 1fr; gap: 10px; align-items: start; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); cursor: pointer; }
 .level-option.selected { border-color: var(--brand); background: var(--brand-50); }
 .level-option span { display: grid; gap: 2px; font-size: .84rem; }
+
+/* ---------------------------------------------------------------- Phase 3: experiment execution */
+.exec-stepper.four { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.variant-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.variant-card { display: grid; gap: 6px; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+.variant-card .pill { justify-self: start; text-transform: capitalize; }
+.progress-box { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface-2); }
+.progress-box > div { display: grid; gap: 2px; }
+.progress-box span { color: var(--text-3); font-size: .75rem; }
+.progress-box p { grid-column: 1 / -1; margin: 0; font-size: .82rem; }
+@media (max-width: 680px) { .variant-grid, .progress-box { grid-template-columns: 1fr; } }

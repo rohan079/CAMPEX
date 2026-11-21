@@ -17,6 +17,8 @@ vi.mock("../../src/intelligenceApi", async () => ({
   listAnomalies: vi.fn(), detectAnomalies: vi.fn(), updateAnomaly: vi.fn(), explainAnomaly: vi.fn(), listExperiments: vi.fn(),
   getExperiment: vi.fn(), createExperiment: vi.fn(), startExperiment: vi.fn(), completeExperiment: vi.fn(),
 }));
+vi.mock("../../src/experimentExecutionApi", () => ({ getExperimentExecution: vi.fn(), launchExperiment: vi.fn(), followUpExperiment: vi.fn(), linkVariantCreative: vi.fn() }));
+vi.mock("../../src/creativeApi", () => ({ listCreatives: vi.fn(async () => []) }));
 vi.mock("../../src/actionApi", () => ({ previewAction: vi.fn(async () => ({ id: "act1" })) }));
 const m = vi.mocked(api);
 

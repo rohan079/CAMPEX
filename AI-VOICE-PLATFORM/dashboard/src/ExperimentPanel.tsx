@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { ExperimentExecutionDrawer } from "./ExperimentExecutionDrawer";
 import { completeExperiment, createExperiment, getExperiment, listExperiments, startExperiment } from "./intelligenceApi";
 import type { Experiment } from "./intelligenceTypes";
 import { labelize } from "./measurementFormat";
@@ -11,6 +12,7 @@ const VARIABLES = ["image", "headline", "primary_text", "cta", "landing_page", "
 export function ExperimentPanel({ clientId }: { clientId: string }) {
   const [items, setItems] = useState<Experiment[]>([]);
   const [selected, setSelected] = useState<Experiment | null>(null);
+  const [running, setRunning] = useState<Experiment | null>(null);
   const [error, setError] = useState<string | null>(null);
   const empty = { name: "", hypothesis: "", variable: "headline", primary_metric: "cost_per_qualified_lead", min_sample_size: "30",
     control_name: "Control", control_ad: "", test_name: "Test", test_ad: "", end_date: "" };
@@ -57,7 +59,8 @@ export function ExperimentPanel({ clientId }: { clientId: string }) {
                 <td>{labelize(e.status)}</td><td>{e.outcome ? labelize(e.outcome) : "—"}</td>
                 <td className="row-actions">
                   <button type="button" className="text-button" onClick={() => void run(getExperiment(e.id))}>Results</button>
-                  {e.status === "draft" && <button type="button" className="text-button" onClick={() => void run(startExperiment(e.id))}>Start</button>}
+                  {e.status !== "cancelled" && <button type="button" className="text-button" onClick={() => setRunning(e)}>{e.status === "draft" ? "Launch…" : "Run in Meta"}</button>}
+                  {e.status === "draft" && <button type="button" className="text-button" title="Start measuring without checking Meta" onClick={() => void run(startExperiment(e.id))}>Start measuring only</button>}
                   {e.status === "running" && <button type="button" className="text-button" onClick={() => void run(completeExperiment(e.id))}>Complete</button>}
                 </td></tr>
             ))}</tbody>
@@ -65,9 +68,11 @@ export function ExperimentPanel({ clientId }: { clientId: string }) {
         )}
       </section>
       {selected && <ExperimentResult experiment={selected} />}
+      {running && <ExperimentExecutionDrawer clientId={clientId} experimentId={running.id} name={running.name}
+        onClose={() => setRunning(null)} onChanged={() => void load()} />}
       <form className="surface-card" aria-label="New experiment" onSubmit={(e) => void create(e)}>
         <p className="step-label">NEW EXPERIMENT</p><h3>Compare two existing ads</h3>
-        <p className="helper-text">Publish both ads through Campaign Studio or Ads Manager first; Campex measures them and never edits live ads.</p>
+        <p className="helper-text">Use two existing ads (paused is fine). “Launch…” checks them in Meta and prepares any resume for approval; Campex never edits live ads without an approved change.</p>
         <div className="form-grid-2">
           <label className="form-field"><span>Name</span><input required value={form.name} onChange={(e) => set("name", e.target.value)} /></label>
           <label className="form-field"><span>Hypothesis</span><input required value={form.hypothesis} onChange={(e) => set("hypothesis", e.target.value)} /></label>
