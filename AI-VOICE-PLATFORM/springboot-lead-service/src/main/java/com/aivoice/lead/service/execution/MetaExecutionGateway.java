@@ -29,6 +29,9 @@ public interface MetaExecutionGateway {
 
     CampaignState status(String accessToken, String adAccountId, String campaignId);
 
+    /** Read-only: status and effective status of the campaigns in one ad account (delivery-issue rules). */
+    List<com.aivoice.lead.service.automation.RuleEvaluator.CampaignStatus> campaignStatuses(String accessToken, String adAccountId);
+
     /** Read-only state of a campaign, ad set or ad: id, name, account_id, status, effective_status, budgets. */
     java.util.Map<String, Object> objectState(String accessToken, String level, String objectId);
 

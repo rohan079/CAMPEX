@@ -7,6 +7,7 @@ from dependencies import require_service_key
 from schemas import (
     MetaCampaignLookupRequest,
     MetaCampaignPublishRequest,
+    MetaCampaignStatusesRequest,
     MetaCampaignStatusRequest,
     MetaObjectApplyRequest,
     MetaObjectStateRequest,
@@ -183,3 +184,17 @@ async def apply_object_change(
     if body.daily_budget_minor is not None:
         arguments["daily_budget_minor"] = body.daily_budget_minor
     return _tool_data(await _call(request, "apply_object_change", arguments))
+
+
+@router.post("/campaigns/statuses")
+async def campaign_statuses(
+    body: MetaCampaignStatusesRequest,
+    request: Request,
+    access_token: str | None = Header(default=None, alias="X-Meta-Access-Token"),
+) -> dict:
+    """Read-only: status and effective status of an account's campaigns (delivery-issue automation rules)."""
+    if not access_token:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Connect Meta Business first")
+    rows = _tool_rows(await _call(request, "get_campaigns", {
+        "ad_account_id": body.ad_account_id, "access_token": access_token, "limit": 100}))
+    return {"campaigns": [{k: row.get(k) for k in ("id", "name", "status", "effective_status")} for row in rows]}

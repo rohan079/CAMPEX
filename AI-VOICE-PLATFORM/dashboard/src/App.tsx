@@ -15,6 +15,7 @@ import { CampaignApprovalsPage } from "./CampaignApprovalsPage";
 import { CampaignStudio } from "./CampaignStudio";
 import { CreativeStudioPage } from "./CreativeStudioPage";
 import { OptimizationActionsPage } from "./OptimizationActionsPage";
+import { AutomationRulesPage } from "./AutomationRulesPage";
 import { NotificationBell } from "./NotificationBell";
 import { ChannelsPage } from "./ChannelsPage";
 import { ClientsPage } from "./ClientsPage";
@@ -24,7 +25,7 @@ import { PerformancePage } from "./PerformancePage";
 import { num } from "./format";
 import type { Client, ClientAnalytics, Health, LeadReviewStats } from "./types";
 
-type View = "campaigns" | "approvals" | "creative" | "actions" | "assistant" | "performance" | "meta-ads" | "lead-review" | "channels" | "clients"
+type View = "campaigns" | "approvals" | "creative" | "actions" | "automation" | "assistant" | "performance" | "meta-ads" | "lead-review" | "channels" | "clients"
   | "measurement" | "tracking" | "attribution" | "crm" | "site-visits" | "sales" | "intelligence";
 /** Views whose data depends on the selected period. */
 const RANGED_VIEWS: View[] = ["performance", "measurement", "tracking", "attribution", "crm", "intelligence"];
@@ -35,6 +36,7 @@ const DAYS_KEY = "campaign-workspace.days";
 const PAGE_META: Record<View, { title: string; eyebrow: string; description: string }> = {
   campaigns: { title: "Campaign studio", eyebrow: "Create and distribute", description: "Plan one creative for every channel." },
   creative: { title: "Creative studio", eyebrow: "AI artwork and copy", description: "Generate, review and approve ad creatives grounded in verified project facts." },
+  automation: { title: "Automation rules", eyebrow: "Monitor and alert", description: "Rules that watch spend, CTR, cost per lead and delivery, with approval-based actions." },
   actions: { title: "Optimization actions", eyebrow: "Approve and verify", description: "Pause, resume or rebudget live campaigns with approval, guardrails and before/after checks." },
   approvals: { title: "Campaign approvals", eyebrow: "Review and publish", description: "Validate, approve and publish campaigns as paused, with a full history." },
   assistant: { title: "AI Campaign Assistant", eyebrow: "Skills and Meta insights", description: "Run marketing skills, analyze live Meta data, and design ads from uploaded images." },
@@ -229,6 +231,7 @@ export function App() {
           <p className="side-group-label">MEASUREMENT</p>
           {navItem("intelligence", "✧", "Performance AI")}
           {navItem("actions", "⇅", "Optimization actions")}
+          {navItem("automation", "⏱", "Automation rules")}
           {navItem("measurement", "▤", "KPIs")}
           {navItem("attribution", "⇢", "Attribution")}
           {navItem("tracking", "⌖", "Tracking & events")}
@@ -274,6 +277,7 @@ export function App() {
 
         {view === "campaigns" && <CampaignStudio client={currentClient} onOpenChannels={() => setView("channels")}
           onOpenApprovals={(id) => { setFocusExecution(id ?? null); setView("approvals"); }} />}
+        {view === "automation" && <AutomationRulesPage key={`${clientId}-${refreshKey}`} clientId={clientId || undefined} />}
         {view === "actions" && <OptimizationActionsPage key={`${clientId}-${refreshKey}`} clientId={clientId || undefined} />}
         {view === "creative" && <CreativeStudioPage key={clientId} clientId={clientId || undefined} />}
         {view === "approvals" && <CampaignApprovalsPage key={`${clientId}-${refreshKey}`} clientId={clientId || undefined}

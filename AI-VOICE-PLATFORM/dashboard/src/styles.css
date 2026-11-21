@@ -1652,3 +1652,27 @@ input[readonly], textarea[readonly] { background: var(--surface-2); color: var(-
 .guardrail-list { margin: 0; padding: 10px 14px 10px 30px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-2); font-size: .84rem; }
 .guardrail-list li { margin: 3px 0; }
 .exec-actions .check-line { margin: 0; flex: 1 1 100%; }
+
+/* ---------------------------------------------------------------- Phase 3: automation rules */
+.rule-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; }
+.rule-card { display: grid; gap: 10px; }
+.rule-card.disabled { opacity: .65; }
+.rule-card header { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
+.rule-card h3 { margin: 0 0 2px; font-size: .98rem; }
+.rule-meta { display: flex; flex-wrap: wrap; gap: 6px; }
+.level-monitor { color: var(--text-2); background: #eef0f5; }
+.level-recommend { color: var(--info); background: var(--info-50); }
+.level-approval_required { color: var(--brand-600); background: var(--brand-50); }
+.level-preapproved { color: #7a4f06; background: var(--warning-50); }
+.switch { position: relative; display: inline-block; flex: 0 0 auto; width: 40px; height: 22px; }
+.switch input { position: absolute; inset: 0; opacity: 0; margin: 0; cursor: pointer; z-index: 1; }
+.switch span { position: absolute; inset: 0; border-radius: 99px; background: var(--border-strong); transition: background 120ms; }
+.switch span::after { content: ""; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: #fff; box-shadow: var(--shadow-xs); transition: transform 120ms; }
+.switch input:checked + span { background: var(--brand); }
+.switch input:checked + span::after { transform: translateX(18px); }
+.switch input:focus-visible + span { box-shadow: var(--focus); }
+.level-picker { display: grid; gap: 8px; margin: 0; padding: 0; border: 0; }
+.level-picker legend { margin-bottom: 6px; color: var(--text-2); font-size: .78rem; font-weight: 600; }
+.level-option { display: grid; grid-template-columns: auto 1fr; gap: 10px; align-items: start; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); cursor: pointer; }
+.level-option.selected { border-color: var(--brand); background: var(--brand-50); }
+.level-option span { display: grid; gap: 2px; font-size: .84rem; }

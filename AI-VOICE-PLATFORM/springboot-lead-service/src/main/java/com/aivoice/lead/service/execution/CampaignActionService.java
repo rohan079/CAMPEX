@@ -74,7 +74,40 @@ public class CampaignActionService {
     public ActionDto preview(UUID clientId, PreviewRequest req) {
         Actor actor = access.require(clientId, Permission.MANAGE);
         Target t = resolveTarget(clientId, req);
-        MetaAccess token = token(clientId, actor);
+        return createPreview(clientId, actor.email(), t, token(clientId, actor), "manual");
+    }
+
+    /**
+     * Automation path: a rule prepares a change. It is created PROPOSED like any other and still needs a person to
+     * approve it (unless the rule is PREAPPROVED, which the automation service gates separately).
+     */
+    public ActionDto previewAsSystem(UUID clientId, String actorLabel, String action, String level, String objectId, String reason) {
+        MetaAccess resolved = metaAccess.resolve(clientId, null);
+        if (!resolved.available()) {
+            throw new ConflictException(resolved.note());
+        }
+        return createPreview(clientId, actorLabel, new Target(action, level, objectId, null, null, reason), resolved, "automation");
+    }
+
+    /** Automation path for PREAPPROVED rules only: records the rule as the approver, then executes like a person would. */
+    public ActionDto approveAndExecuteAsSystem(UUID id, String actorLabel, String note) {
+        UUID clientId = clientOf(id);
+        tx.executeWithoutResult(s -> {
+            Map<String, Object> row = lock(id);
+            requireStatus(row, Set.of("PROPOSED"), "approved");
+            jdbc.update("UPDATE campaign_actions SET status = 'APPROVED', approved_by = ?, approved_at = ?, approval_note = ?, "
+                    + "updated_at = ? WHERE id = ?", actorLabel, now(), note, now(), id);
+            event(id, "approve", "ok", note, actorLabel);
+            audit.record(clientId, actorLabel, ENTITY, id, "approved_by_rule", Map.of("note", note));
+        });
+        MetaAccess resolved = metaAccess.resolve(clientId, null);
+        if (!resolved.available()) {
+            throw new ConflictException(resolved.note());
+        }
+        return executeInternal(id, clientId, new Actor(actorLabel, false), resolved);
+    }
+
+    private ActionDto createPreview(UUID clientId, String actorEmail, Target t, MetaAccess token, String source) {
         Map<String, Object> before;
         try {
             before = meta.objectState(token.token(), t.level(), t.objectId());
@@ -95,22 +128,22 @@ public class CampaignActionService {
                                 + "object_name, ad_account_id, status, before_state, proposed_after, guardrails, reason, created_by, "
                                 + "expires_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'PROPOSED', ?::jsonb, ?::jsonb, "
                                 + "?::jsonb, ?, ?, ?, ?, ?)",
-                        id, clientId, t.recommendationId(), t.recommendationId() == null ? "manual" : "recommendation",
+                        id, clientId, t.recommendationId(), t.recommendationId() != null ? "recommendation" : source,
                         t.action(), t.level(), t.objectId(), text(before.get("name")), account, write(before),
-                        write(result.proposed()), write(result.checks()), t.reason(), actor.email(),
+                        write(result.proposed()), write(result.checks()), t.reason(), actorEmail,
                         Timestamp.from(Instant.now().plus(PREVIEW_TTL)), now, now);
-                event(id, "preview", "ok", null, actor.email());
-                audit.record(clientId, actor.email(), ENTITY, id, "previewed",
+                event(id, "preview", "ok", null, actorEmail);
+                audit.record(clientId, actorEmail, ENTITY, id, "previewed",
                         Map.of("action", t.action(), "level", t.level(), "object_id", t.objectId(), "before", before,
                                 "proposed", result.proposed()));
-                notifications.notifyClientManagers(clientId, actor.email(), "optimization_approval_requested", "info",
+                notifications.notifyClientManagers(clientId, actorEmail, "optimization_approval_requested", "info",
                         "Approve change: " + label(t.action()) + " · " + (before.get("name") == null ? t.objectId() : before.get("name")),
                         "Review the before/after and approve or reject it.", ENTITY, id);
             });
         } catch (DuplicateKeyException e) {
             throw new ConflictException("There is already an open change for this object; finish or cancel it first");
         }
-        return get(id);
+        return dto(id);
     }
 
     public List<ActionDto> list(UUID clientId, String status) {
@@ -176,7 +209,10 @@ public class CampaignActionService {
         }
         UUID clientId = clientOf(id);
         Actor actor = access.require(clientId, Permission.MANAGE);
-        MetaAccess token = token(clientId, actor);
+        return executeInternal(id, clientId, actor, token(clientId, actor));
+    }
+
+    private ActionDto executeInternal(UUID id, UUID clientId, Actor actor, MetaAccess token) {
         Map<String, Object> claimed = tx.execute(s -> {
             Map<String, Object> row = lock(id);
             requireStatus(row, Set.of("APPROVED", "FAILED"), "executed");

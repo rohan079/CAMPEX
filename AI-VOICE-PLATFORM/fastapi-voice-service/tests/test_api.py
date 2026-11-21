@@ -344,3 +344,20 @@ def test_object_apply_requires_confirmation_service_key_and_token(client):
     assert response.status_code == 200
     assert "private" not in response.text
     assert seen == {"level": "ad", "status": "PAUSED", "budget": None, "token": "private"}
+
+
+def test_campaign_statuses_are_read_only_and_token_free(client):
+    from fastmcp import FastMCP
+
+    test_mcp = FastMCP("statuses")
+
+    @test_mcp.tool
+    async def get_campaigns(ad_account_id: str, access_token: str, limit: int = 50, status_filter: str = "") -> list[dict]:
+        return [{"id": "1", "name": "Villas", "status": "ACTIVE", "effective_status": "WITH_ISSUES", "daily_budget": "35000"}]
+
+    app.state.meta_ads_mcp = test_mcp
+    response = client.post("/api/meta/campaigns/statuses", json={"ad_account_id": "act_1"},
+                           headers={**KEY, "X-Meta-Access-Token": "secret-token"})
+    assert response.status_code == 200
+    assert response.json() == {"campaigns": [{"id": "1", "name": "Villas", "status": "ACTIVE", "effective_status": "WITH_ISSUES"}]}
+    assert "secret-token" not in response.text

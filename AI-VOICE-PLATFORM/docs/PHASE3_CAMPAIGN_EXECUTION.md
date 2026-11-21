@@ -12,7 +12,7 @@ Phase 3 is delivered in increments. This document is updated with each one; sect
 | 2 | Campaign Studio → approval flow; Campaign approvals page (history, validation, approvals, actions); notification bell | **built** |
 | 3 | Creative Studio: AI copy with claim checks, artwork generation/upload, persistent storage, versions, review, attach to campaigns | **built** |
 | 4 | Optimization actions: pause / resume / daily budget, previewed from Meta, approved, applied once, verified | **built** |
-| 5 | Automation rules (levels 1–3; level 4 off by default) | planned |
+| 5 | Automation rules: spend, CTR decline, cost per lead, delivery issues; levels 1–4 (level 4 off by default) | **built** |
 | 6 | Experiment execution on top of Phase 2 experiments | planned |
 
 ---
@@ -313,6 +313,46 @@ sequenceDiagram
 FastAPI (service key only, not in the AI allowlist): `POST /api/meta/objects/state` (read) and
 `POST /api/meta/objects/apply` (write, Spring only).
 
+## 6c. Automation rules (increment 5)
+
+Rules run on a schedule (`campex.automation.cron`, default every 15 minutes, each rule hourly or daily) or with
+**Run now**. Evaluation is deterministic (`RuleEvaluator`) over the Phase 2 daily campaign snapshots; only the
+delivery-issue rule reads Meta (read-only campaign statuses).
+
+| Rule | Condition | Insufficient-data guard |
+|---|---|---|
+| Spend above limit (A) | Total spend on the latest day > threshold (₹). Latest day may be revised by Meta. | — |
+| CTR decline (B) | CTR of the last N settled days vs the N before, decline ≥ threshold % (default 30) | Both windows need `min_sample` impressions (default 1,000) |
+| Cost per lead too high (C) | Spend ÷ Meta-reported leads over N settled days > threshold (₹) | Needs `min_sample` leads (default 5) |
+| Delivery problem (D) | Meta effective status `DISAPPROVED`, `WITH_ISSUES` or `PENDING_BILLING_INFO` | — |
+| Insufficient data (E) | Built into every rule: thin windows are recorded as "not enough data" and never trigger anything | — |
+
+Each rule has client scope and optional campaign scope, threshold, observation window, minimum sample, frequency,
+severity, in-app notification preference, cooldown (no repeat alerts for the same campaign within N hours) and an
+enabled flag.
+
+| Level | What happens when it triggers |
+|---|---|
+| 1 MONITOR | Recorded in the run history |
+| 2 RECOMMEND | Owners and managers are notified (spend → `budget_threshold_reached`, CPL → `cpl_increased`, delivery → `campaign_delivery_issue`, CTR → `optimization_recommendation_available`) |
+| 3 APPROVAL_REQUIRED | A **pause** of the campaign is prepared in Optimization actions (source `automation`); a person approves and applies it |
+| 4 PREAPPROVED | Pauses one campaign automatically through the same action engine (re-read, apply once, verify), recorded with `approved_by = automation:<rule>` |
+
+Level 4 safeguards: **off unless `AUTOMATION_PREAPPROVED_ACTIONS_ENABLED=true`** (rules cannot even be saved at
+level 4 otherwise); only `pause` (reversible, stops spend); only CTR/CPL rules scoped to a single campaign; daily cap
+(`max_auto_actions_per_day`, 1–5) after which it falls back to preparing for approval; cooldown; every run audited
+and notified. No level can raise a budget, resume or activate anything.
+
+| Method | Path | Permission |
+|---|---|---|
+| GET | `/api/automation/settings` | signed-in |
+| POST / GET | `/api/clients/{clientId}/automation-rules` | MANAGE / READ |
+| PUT | `/api/automation-rules/{id}` | MANAGE |
+| POST | `/api/automation-rules/{id}/enable` · `/disable` · `/run` | MANAGE |
+| GET | `/api/clients/{clientId}/automation-executions` | READ |
+
+FastAPI (service key, read-only): `POST /api/meta/campaigns/statuses`.
+
 ## 7. Roles and permissions
 
 Spec roles map onto the existing per-client roles (no schema change needed yet):
@@ -331,7 +371,15 @@ setting is a planned option. Non-members get `404` (tenant ids cannot be probed)
 
 ## 8. Configuration
 
-No new environment variables in increment 1. Uses the existing `CAMPEX_PLATFORM_ADMIN_EMAILS`, Meta OAuth settings,
+Increment 5 adds (Spring, all optional):
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `AUTOMATION_ENABLED` | `true` | Scheduled rule evaluation |
+| `AUTOMATION_CRON` | `0 */15 * * * *` | How often due rules are checked |
+| `AUTOMATION_PREAPPROVED_ACTIONS_ENABLED` | `false` | Allows level 4 (pre-approved pause). Leave off unless the agency has agreed to it |
+
+Earlier increments need no new environment variables. Uses the existing `CAMPEX_PLATFORM_ADMIN_EMAILS`, Meta OAuth settings,
 `VOICE_SERVICE_BASE_URL` and internal service key.
 
 ## 9. Known limitations and unsupported Meta capabilities

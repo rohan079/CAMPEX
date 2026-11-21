@@ -56,6 +56,21 @@ public class McpMetaExecutionGateway implements MetaExecutionGateway {
     }
 
     @Override
+    public List<com.aivoice.lead.service.automation.RuleEvaluator.CampaignStatus> campaignStatuses(String accessToken, String adAccountId) {
+        Map<String, Object> r = call("/api/meta/campaigns/statuses", Map.of("ad_account_id", adAccountId), accessToken);
+        List<com.aivoice.lead.service.automation.RuleEvaluator.CampaignStatus> out = new ArrayList<>();
+        if (r.get("campaigns") instanceof List<?> rows) {
+            for (Object row : rows) {
+                if (row instanceof Map<?, ?> m) {
+                    out.add(new com.aivoice.lead.service.automation.RuleEvaluator.CampaignStatus(text(m.get("id")),
+                            text(m.get("name")), text(m.get("status")), text(m.get("effective_status"))));
+                }
+            }
+        }
+        return out;
+    }
+
+    @Override
     public Map<String, Object> objectState(String accessToken, String level, String objectId) {
         return call("/api/meta/objects/state", Map.of("level", level, "object_id", objectId), accessToken);
     }
