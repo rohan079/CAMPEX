@@ -11,7 +11,7 @@ import {
 import { firebaseConfig, isFirebaseConfigured } from "./firebaseConfig";
 
 if (!isFirebaseConfigured()) {
-  throw new Error("Firebase is not configured. Set the VITE_FIREBASE_* environment variables.");
+  throw new Error("Firebase is not configured. Set the FIREBASE_* environment variables.");
 }
 
 const app: FirebaseApp = initializeApp(firebaseConfig);

@@ -10,7 +10,7 @@ function SetupRequired() {
         <p className="eyebrow">Configuration needed</p>
         <h1>Campex can't start yet</h1>
         <p>Sign-in is not configured for this deployment. An administrator needs to set the
-          <code> VITE_FIREBASE_* </code> environment variables and redeploy.</p>
+          <code> FIREBASE_* </code> environment variables and redeploy.</p>
       </section>
     </main>
   );
