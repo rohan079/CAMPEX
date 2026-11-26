@@ -156,6 +156,37 @@ class MetaAdsGraphApi:
         return params
 
 
+LOCATION_TYPES = ("city", "region", "country")
+
+
+def location_label(row: dict[str, Any]) -> str:
+    """'Guntur, Andhra Pradesh, India' for a city; 'Andhra Pradesh, India' for a region; 'India'."""
+    kind = row.get("type")
+    parts = [row.get("name")]
+    if kind == "city":
+        parts.append(row.get("region"))
+    if kind != "country":
+        parts.append(row.get("country_name"))
+    seen: list[str] = []
+    for part in parts:
+        text = str(part or "").strip()
+        if text and text not in seen:
+            seen.append(text)
+    return ", ".join(seen)
+
+
+def _geo_locations(geo_type: str, geo_key: str) -> dict[str, Any]:
+    if not geo_key:
+        raise MetaAdsToolError("Meta returned no location key for the selected target.")
+    if geo_type == "country":
+        return {"countries": [geo_key]}
+    if geo_type == "region":
+        return {"regions": [{"key": geo_key}]}
+    if geo_type == "city":
+        return {"cities": [{"key": geo_key}]}
+    raise MetaAdsToolError("Location type must be city, region or country.")
+
+
 def create_meta_ads_mcp(
     settings: Settings | None = None,
     transport: httpx.AsyncBaseTransport | None = None,
@@ -662,6 +693,74 @@ def create_meta_ads_mcp(
             "totals": totals,
         }
 
+    async def _search_locations(query: str, access_token: str, limit: int = 8) -> list[dict[str, Any]]:
+        rows = await graph.list_edge(
+            "search", access_token, "key,name,type,region,country_name,country_code", limit,
+            {
+                "type": "adgeolocation",
+                "location_types": json.dumps(list(LOCATION_TYPES)),
+                "q": query,
+            },
+        )
+        return [row for row in rows if row.get("type") in LOCATION_TYPES and row.get("key")]
+
+    async def _resolve_location(location: str, access_token: str, geo_key: str | None,
+                                geo_type: str | None) -> dict[str, Any]:
+        if geo_key and geo_type:
+            return _geo_locations(geo_type, geo_key.strip())
+        query = location.strip()
+        parts = [part.strip() for part in query.split(",") if part.strip()]
+        matches = await _search_locations(query, access_token)
+        if not matches and len(parts) > 1:
+            # "Guntur, Andhra Pradesh" usually finds nothing as one query: search the place, then
+            # keep only rows whose region or country matches the rest of the text.
+            qualifiers = [part.casefold() for part in parts[1:]]
+            matches = [
+                row for row in await _search_locations(parts[0], access_token)
+                if all(any(q in str(row.get(f) or "").casefold() for f in ("region", "country_name", "country_code"))
+                       for q in qualifiers)
+            ]
+        if not matches:
+            raise MetaAdsToolError(
+                f"Meta found no city, region or country matching \"{query}\". "
+                "Pick the location from Meta's suggestions in Campaign Studio."
+            )
+        wanted = {query.casefold(), parts[0].casefold() if parts else ""}
+        exact = [
+            row for row in matches
+            if str(row.get("name", "")).strip().casefold() in wanted or location_label(row).casefold() == query.casefold()
+        ]
+        if len(exact) == 1:
+            match = exact[0]
+        elif len(matches) == 1:
+            match = matches[0]
+        else:
+            options = "; ".join(location_label(row) for row in (exact or matches)[:5])
+            raise MetaAdsToolError(
+                f"\"{query}\" matches several places in Meta ({options}). "
+                "Pick the exact one from the suggestions in Campaign Studio."
+            )
+        return _geo_locations(str(match.get("type") or "city"), str(match.get("key")))
+
+    @mcp.tool
+    async def search_ad_locations(query: str, access_token: str) -> list[dict[str, Any]]:
+        """Read-only. Cities, regions and countries Meta can target for a search text."""
+        text = query.strip()
+        if len(text) < 2:
+            return []
+        return [
+            {
+                "key": str(row.get("key")),
+                "type": row.get("type"),
+                "name": row.get("name"),
+                "region": row.get("region"),
+                "country_name": row.get("country_name"),
+                "country_code": row.get("country_code"),
+                "label": location_label(row),
+            }
+            for row in await _search_locations(text[:100], access_token)
+        ]
+
     @mcp.tool
     async def create_paused_campaign(
         ad_account_id: str,
@@ -674,8 +773,13 @@ def create_meta_ads_mcp(
         access_token: str,
         confirmed: bool,
         daily_budget_minor: int = 50000,
+        geo_key: str | None = None,
+        geo_type: Literal["city", "region", "country"] | None = None,
     ) -> dict[str, Any]:
-        """Create a PAUSED Meta campaign and ad set; create a paused link ad when a Page is selected."""
+        """Create a PAUSED Meta campaign and ad set; create a paused link ad when a Page is selected.
+
+        Pass geo_key/geo_type from search_ad_locations to target exactly that place; otherwise the
+        location text is searched and must match a single city, region or country."""
         if not confirmed:
             raise MetaAdsToolError("Explicit user confirmation is required before creating a campaign.")
         if daily_budget_minor < 100:
@@ -691,37 +795,7 @@ def create_meta_ads_mcp(
         if account not in {row.get("id") for row in allowed_accounts}:
             raise MetaAdsToolError("Selected ad account is not available to the connected Meta user.")
 
-        matches = await graph.list_edge(
-            "search", access_token, "key,name,type,country_code", 5,
-            {
-                "type": "adgeolocation",
-                "location_types": json.dumps(["city", "region", "country"]),
-                "q": location.strip(),
-            },
-        )
-        if not matches:
-            raise MetaAdsToolError("Meta could not match the target location. Choose a more specific city, region, or country.")
-        exact_matches = [
-            row for row in matches
-            if str(row.get("name", "")).strip().casefold() == location.strip().casefold()
-        ]
-        if len(exact_matches) == 1:
-            match = exact_matches[0]
-        elif len(matches) == 1:
-            match = matches[0]
-        else:
-            suggestions = ", ".join(str(row.get("name", "")) for row in matches if row.get("name"))
-            raise MetaAdsToolError(f"Target location is ambiguous; refine it to one of: {suggestions}")
-        geo_type = match.get("type") or "city"
-        geo_key = str(match.get("key", ""))
-        if not geo_key:
-            raise MetaAdsToolError("Meta returned no location key for the selected target.")
-        if geo_type == "country":
-            geo_locations = {"countries": [match.get("country_code") or geo_key]}
-        elif geo_type == "region":
-            geo_locations = {"regions": [{"key": geo_key}]}
-        else:
-            geo_locations = {"cities": [{"key": geo_key}]}
+        geo_locations = await _resolve_location(location, access_token, geo_key, geo_type)
 
         publisher_platforms = sorted({
             "facebook" if platform in {"facebook", "whatsapp_ads"} else "instagram"

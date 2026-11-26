@@ -380,6 +380,84 @@ Builds on the Phase 2 experiments (design, interim and final statistics, `winner
 | PUT | `/api/experiments/{id}/variants/{variantId}/creative` | MANAGE (draft only) |
 | POST | `/api/experiments/{id}/launch` · `/follow-up` | MANAGE |
 
+## 6e. Video ads and ad creation
+
+Campaigns can now run a **video ad** (MP4/MOV, up to 60 s by default) as well as an image ad, and Campex creates
+the ad itself after publishing, instead of leaving it to Ads Manager.
+
+**Upload (Creative Studio → Artwork → Upload a video ad).** The browser reads the duration and captures a thumbnail
+frame (Meta requires one for video ads), then uploads with a progress bar. Large files go **directly to the lead
+service** (`CAMPEX_UPLOAD_URL`), because the Vercel proxy rejects request bodies over ~4.5 MB. The server streams the
+file to disk, enforces the size limit while copying, reads the real duration from the MP4/MOV `moov/mvhd` header
+(`Mp4Inspector`; it never decodes media) and rejects anything longer than `CAMPEX_MAX_VIDEO_SECONDS`. Videos are
+stored under `CAMPEX_MEDIA_DIR` (a persistent volume), referenced by `creative_media`; thumbnails stay in
+`creative_images`. Playback is fetched on demand by members of the client only, with HTTP range support.
+Video creatives go through the same review as images: versions keep the video, and only the copy changes.
+
+**Ad creation after publish** (`AdCreationService`, migration `V21__video_creatives_and_ads.sql`). When an approved
+campaign is published (paused) with an approved creative, a destination URL and a Facebook Page, `ad_status`
+becomes `pending` and a background worker (every 15 s, or **Check now**) runs:
+
+```mermaid
+stateDiagram-v2
+  [*] --> pending
+  pending --> uploading: upload image / video + thumbnail
+  uploading --> processing: video
+  uploading --> creating: image
+  processing --> processing: Meta still processing (checked every 30 s, up to 30 min)
+  processing --> creating: video ready
+  creating --> created: ad creative + ad (PAUSED)
+  uploading --> failed
+  processing --> failed
+  creating --> failed
+  failed --> pending: Retry
+```
+
+* Every Meta ID (image hash, video ID, creative ID, ad ID) is stored as soon as Meta returns it; a retry continues
+  from there and **never uploads or creates twice**. Before creating the ad, Campex looks for an ad in the ad set
+  whose name carries the publish tag and links it instead of creating another.
+* The ad is always created **PAUSED**. Nothing spends until someone activates it (an approved Optimization action).
+* Without a creative, URL or Page, `ad_status` is `skipped` with the reason, and the ad is added in Ads Manager.
+* FastAPI (service key only, not reachable from AI tools): `/api/meta/ads-builder/{image,video,video-status,creative,find-ads,ad}`.
+  Video upload uses Meta's video host (`graph-video.facebook.com/{version}/act_{id}/advideos`); creatives use
+  `object_story_spec.video_data` (video ID + thumbnail hash) or `link_data` (image hash).
+
+| Method | Path | Permission |
+|---|---|---|
+| GET | `/api/creative/media-limits` | signed-in |
+| POST | `/api/clients/{clientId}/creative/videos` (multipart: `video`, `thumbnail`, `name`, `ad_type`, `facts`) | MANAGE |
+| GET | `/api/creative/videos/{mediaId}` | READ (range requests supported) |
+| POST | `/api/campaign-executions/{id}/ad/check` · `/ad/retry` | MANAGE |
+
+**New settings**
+
+| Service | Variable | Default | Meaning |
+|---|---|---|---|
+| Spring | `CAMPEX_MEDIA_DIR` | empty (video disabled) | Directory for video files; on Railway, mount a volume there |
+| Spring | `CAMPEX_MAX_VIDEO_SECONDS` | `60` | Longest video accepted |
+| Spring | `CAMPEX_MAX_VIDEO_MB` | `200` | Largest video accepted |
+| Spring | `CORS_ORIGINS` | — | Must include the dashboard's domain for direct uploads |
+| Dashboard | `CAMPEX_UPLOAD_URL` | empty (same origin) | Public HTTPS URL of the lead service for uploads |
+
+## 6f. Exact Meta locations and revising a rejected publish
+
+Meta's location search often finds nothing for free text such as "Guntur, Andhra Pradesh", which made the publish
+fail with "Meta could not match the target location".
+
+- **Location picker.** Campaign Studio and the approvals edit form search Meta while you type
+  (`GET /api/clients/{clientId}/meta/locations?q=`, MANAGE, read-only, using the client's Meta connection). Picking a
+  suggestion stores `location_key` and `location_type` (city, region or country) in the config. The publish then
+  targets that key directly, with no text matching.
+- **Typed text still works.** A config without a key gets an `unverified` warning. At publish, FastAPI searches the
+  full text; if nothing matches it searches the first comma part and keeps only results whose region or country
+  matches the rest. Several matches fail with the options listed.
+- **Hash compatibility.** Both fields are left out of the stored JSON when absent, so configs saved earlier keep their
+  hash and their approvals.
+- **Revise.** `POST /api/campaign-executions/{id}/revise` (MANAGE) moves a FAILED execution back to DRAFT, but only when
+  Meta rejected the publish and nothing was created (`publish_outcome = 'rejected'`, no Meta campaign). Earlier
+  approvals are invalidated, so the fixed campaign is validated, submitted and approved again. The approvals page
+  shows this as "Edit and resubmit".
+
 ## 7. Roles and permissions
 
 Spec roles map onto the existing per-client roles (no schema change needed yet):
@@ -411,12 +489,15 @@ Earlier increments need no new environment variables. Uses the existing `CAMPEX_
 
 ## 9. Known limitations and unsupported Meta capabilities
 
-* **Ads are not created yet.** The campaign and ad set are created paused; creating the ad needs an uploaded Meta
-  image hash (`/act_{id}/adimages`) and an ad creative. Approved creatives are stored and previewed in Campex, but
-  the Meta image upload will be added only after verifying the Graph API flow and permissions on a real test ad
-  account.
-* Creative images live in PostgreSQL. Fine for single-image ads at agency scale; move to object storage before
-  storing video or large volumes.
+* **Ad creation (image and video) has only been tested against mocks.** Verify it on a test ad account first: the
+  Graph calls follow Meta's documented flow, but permissions (`ads_management`, Page access) and account settings
+  vary. Ads are created as **link ads** to the destination URL; Meta instant lead forms are not supported yet.
+* Lead campaigns optimize for `LEAD_GENERATION`; Meta may require a lead form for that goal. If ad creation fails for
+  a lead campaign, use the Traffic objective with a landing page, or finish the ad in Ads Manager.
+* Video uploads use Meta's single-request upload, suitable for short ads; very large files would need Meta's
+  resumable upload, which is not implemented.
+* Creative images live in PostgreSQL and videos on a mounted disk (`CAMPEX_MEDIA_DIR`). Back up that volume; moving
+  to object storage (S3/R2) later only changes `MediaStorage`.
 * Ad set schedule (start/end time), placements beyond the tool's defaults, special ad categories (housing!) and
   detailed targeting are not configurable yet. **Real-estate advertisers in many regions must declare the housing
   special ad category**; the current tool sends an empty list. Until that is configurable, review the campaign in Ads

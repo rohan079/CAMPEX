@@ -11,7 +11,7 @@ public interface MetaExecutionGateway {
 
     record PublishCommand(String adAccountId, String campaignName, String objective, List<String> platforms,
                           String location, int ageMin, int ageMax, long dailyBudgetMinor, String headline,
-                          String primaryText, String cta, String pageId) {
+                          String primaryText, String cta, String pageId, String geoKey, String geoType) {
     }
 
     record PublishResult(String campaignId, String adsetId, String adId, String status, String warning) {
@@ -24,6 +24,9 @@ public interface MetaExecutionGateway {
     }
 
     PublishResult publish(String accessToken, PublishCommand command);
+
+    /** Read-only: places Meta can target for a search text. */
+    List<com.aivoice.lead.dto.CampaignExecutionDtos.MetaLocation> searchLocations(String accessToken, String query);
 
     List<FoundCampaign> findByNameFragment(String accessToken, String adAccountId, String fragment);
 
@@ -38,6 +41,25 @@ public interface MetaExecutionGateway {
     /** Applies one approved status and/or daily budget change. Idempotent: it sets values, it does not add to them. */
     java.util.Map<String, Object> applyChange(String accessToken, String level, String objectId, String status,
                                              Long dailyBudgetMinor);
+
+    record CreativeSpec(String adAccountId, String pageId, String kind, String name, String linkUrl, String message,
+                        String headline, String description, String cta, String imageHash, String videoId) {
+    }
+
+    String uploadImage(String accessToken, String adAccountId, String name, byte[] data);
+
+    String uploadVideo(String accessToken, String adAccountId, String name, java.nio.file.Path file, String mime);
+
+    /** Meta's processing state for an uploaded video: "ready", "processing" or "error". */
+    String videoStatus(String accessToken, String videoId);
+
+    String createCreative(String accessToken, CreativeSpec spec);
+
+    /** IDs of ads in the ad set whose name contains {@code fragment} (reconciliation before creating). */
+    List<String> findAds(String accessToken, String adsetId, String fragment);
+
+    /** Creates a PAUSED ad. */
+    String createAd(String accessToken, String adAccountId, String adsetId, String creativeId, String name);
 
     class GatewayException extends RuntimeException {
         public GatewayException(String message, Throwable cause) {

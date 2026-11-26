@@ -29,7 +29,16 @@ public final class CampaignExecutionDtos {
             @Size(max = 2048) String destinationUrl,
             @Size(max = 64) String pageId,
             @Size(max = 64) String creativeAssetId,
-            Integer creativeVersion) {
+            Integer creativeVersion,
+            // Left out of the stored JSON when absent, so configs saved before these existed keep their hash.
+            @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+            @Size(max = 64) String locationKey,
+            @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+            @Size(max = 16) String locationType) {
+    }
+
+    /** A place Meta can target, from Meta's location search. */
+    public record MetaLocation(String key, String type, String name, String region, String countryName, String label) {
     }
 
     public record ValidationIssue(String field, String code, String message) {
@@ -67,7 +76,8 @@ public final class CampaignExecutionDtos {
                                   ValidationReport lastValidation, String publishTag, int publishAttempts,
                                   String metaAdsetId, Instant metaCheckedAt, List<VersionDto> versions,
                                   List<ApprovalDto> approvals, List<StepDto> steps,
-                                  List<String> allowedActions) {
+                                  List<String> allowedActions, String adStatus, String adError, String metaAdId,
+                                  String metaVideoId, String metaCreativeId) {
     }
 
     public record NotificationDto(String id, String clientId, String type, String severity, String title,

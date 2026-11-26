@@ -27,9 +27,12 @@ public class CampaignExecutionController {
 
     private final CampaignExecutionService executions;
     private final NotificationService notifications;
+    private final com.aivoice.lead.service.execution.AdCreationService ads;
 
-    public CampaignExecutionController(CampaignExecutionService executions, NotificationService notifications) {
+    public CampaignExecutionController(CampaignExecutionService executions, NotificationService notifications,
+                                       com.aivoice.lead.service.execution.AdCreationService ads) {
         this.executions = executions;
+        this.ads = ads;
         this.notifications = notifications;
     }
 
@@ -87,6 +90,30 @@ public class CampaignExecutionController {
     @PostMapping("/api/campaign-executions/{id}/reconcile")
     public ExecutionDetail reconcile(@PathVariable String id) {
         return executions.reconcile(execution(id));
+    }
+
+    @PostMapping("/api/campaign-executions/{id}/ad/retry")
+    public ExecutionDetail retryAd(@PathVariable String id) {
+        java.util.UUID execution = execution(id);
+        ads.retry(execution);
+        return executions.get(execution);
+    }
+
+    @PostMapping("/api/campaign-executions/{id}/ad/check")
+    public ExecutionDetail checkAd(@PathVariable String id) {
+        java.util.UUID execution = execution(id);
+        ads.advanceNow(execution);
+        return executions.get(execution);
+    }
+
+    @PostMapping("/api/campaign-executions/{id}/revise")
+    public ExecutionDetail revise(@PathVariable String id) {
+        return executions.revise(Ids.uuid(id, "Campaign execution"));
+    }
+
+    @GetMapping("/api/clients/{clientId}/meta/locations")
+    public Map<String, Object> locations(@PathVariable String clientId, @RequestParam(name = "q", defaultValue = "") String q) {
+        return Map.of("locations", executions.searchLocations(Ids.uuid(clientId, "Client"), q));
     }
 
     @PostMapping("/api/campaign-executions/{id}/cancel")

@@ -51,6 +51,9 @@ export interface CreativeSummary {
   headline: string | null;
   created_by: string;
   updated_at: string;
+  media_type: "image" | "video";
+  video_id: string | null;
+  video_duration_ms: number | null;
 }
 
 export interface CreativeVersion {
@@ -67,6 +70,8 @@ export interface CreativeVersion {
   change_note: string | null;
   created_by: string;
   created_at: string;
+  video_id: string | null;
+  video_duration_ms: number | null;
 }
 
 export interface CreativeDetail {

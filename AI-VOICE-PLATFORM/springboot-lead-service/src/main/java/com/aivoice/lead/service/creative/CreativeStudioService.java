@@ -65,9 +65,12 @@ public class CreativeStudioService {
     private final NotificationService notifications;
     private final CreativeAiGateway ai;
     private final ObjectMapper json;
+    private final com.aivoice.lead.service.media.MediaStorage media;
 
     public CreativeStudioService(JdbcTemplate jdbc, TransactionTemplate tx, ClientAccessService access, AuditService audit,
-                                 NotificationService notifications, CreativeAiGateway ai, ObjectMapper json) {
+                                 NotificationService notifications, CreativeAiGateway ai, ObjectMapper json,
+                                 com.aivoice.lead.service.media.MediaStorage media) {
+        this.media = media;
         this.jdbc = jdbc;
         this.tx = tx;
         this.access = access;
@@ -142,6 +145,84 @@ public class CreativeStudioService {
         return detail(assetId);
     }
 
+    /**
+     * Video creative: the file is streamed to the media directory, checked (MP4/MOV container, duration within the
+     * limit), and stored with a thumbnail image that Meta requires for video ads.
+     */
+    public AssetDetail uploadVideo(UUID clientId, String name, String adType, List<String> facts,
+                                   org.springframework.web.multipart.MultipartFile video,
+                                   org.springframework.web.multipart.MultipartFile thumbnail) {
+        Actor actor = access.require(clientId, Permission.MANAGE);
+        if (video == null || video.isEmpty()) throw new IllegalArgumentException("Choose a video file");
+        if (thumbnail == null || thumbnail.isEmpty()) throw new IllegalArgumentException("A thumbnail image is required for video ads");
+        if (name == null || name.isBlank() || name.length() > 160) throw new IllegalArgumentException("Name the creative (max 160 characters)");
+        byte[] thumbBytes;
+        try {
+            thumbBytes = thumbnail.getBytes();
+        } catch (java.io.IOException e) {
+            throw new IllegalArgumentException("The thumbnail could not be read");
+        }
+        String thumbMime = thumbnail.getContentType() == null ? "" : thumbnail.getContentType();
+        requireImage(thumbBytes, thumbMime);
+        com.aivoice.lead.service.media.MediaStorage.Stored stored;
+        try (java.io.InputStream in = video.getInputStream()) {
+            stored = media.storeTemp(clientId, in, "mp4");
+        } catch (java.io.IOException e) {
+            throw new IllegalArgumentException("The video could not be read");
+        }
+        com.aivoice.lead.service.media.Mp4Inspector.Info info;
+        try {
+            info = com.aivoice.lead.service.media.Mp4Inspector.inspect(stored.path());
+        } catch (com.aivoice.lead.service.media.Mp4Inspector.InvalidVideoException e) {
+            media.discard(stored);
+            throw new IllegalArgumentException(e.getMessage());
+        }
+        if (info.durationMs() > media.maxVideoSeconds() * 1000L + 500) {
+            media.discard(stored);
+            throw new IllegalArgumentException("Videos can be at most " + media.maxVideoSeconds() + " seconds (this one is "
+                    + Math.round(info.durationMs() / 1000.0) + " s)");
+        }
+        media.commit(stored);
+        UUID assetId = UUID.randomUUID();
+        UUID mediaId = UUID.randomUUID();
+        String original = video.getOriginalFilename() == null ? null
+                : video.getOriginalFilename().replaceAll("[^\\w. -]", "_").substring(0, Math.min(200, video.getOriginalFilename().length()));
+        List<String> cleanFacts = facts(facts);
+        tx.executeWithoutResult(s -> {
+            Timestamp now = now();
+            jdbc.update("INSERT INTO creative_media (id, client_id, kind, storage, storage_key, mime_type, size_bytes, sha256, duration_ms, "
+                            + "original_name, created_by, created_at) VALUES (?, ?, 'video', 'filesystem', ?, ?, ?, ?, ?, ?, ?, ?)",
+                    mediaId, clientId, stored.key(), info.mimeType(), stored.size(), stored.sha256(), (int) info.durationMs(),
+                    original, actor.email(), now);
+            UUID imageId = storeImage(clientId, thumbBytes, thumbMime, "uploaded", null, null, actor.email());
+            jdbc.update("INSERT INTO creative_assets (id, client_id, name, ad_type, status, current_version, media_type, created_by, "
+                            + "updated_by, created_at, updated_at) VALUES (?, ?, ?, ?, 'EDITING', 1, 'video', ?, ?, ?, ?)",
+                    assetId, clientId, name.trim(), orDefault(adType, "property_launch"), actor.email(), actor.email(), now, now);
+            jdbc.update("INSERT INTO creative_versions (id, asset_id, version, image_id, video_id, facts, created_by, created_at, change_note) "
+                            + "VALUES (?, ?, 1, ?, ?, ?::jsonb, ?, ?, ?)",
+                    UUID.randomUUID(), assetId, imageId, mediaId, write(cleanFacts), actor.email(), now,
+                    "Uploaded video (" + Math.round(info.durationMs() / 1000.0) + " s)");
+            audit.record(clientId, actor.email(), ENTITY, assetId, "created", Map.of("source", "uploaded_video",
+                    "duration_ms", info.durationMs(), "size_bytes", stored.size()));
+        });
+        return detail(assetId);
+    }
+
+    public record VideoFile(java.nio.file.Path path, String mimeType, long size) {
+    }
+
+    /** A stored video for playback; only members of the owning client can read it. */
+    public VideoFile video(UUID mediaId) {
+        Map<String, Object> row = jdbc.queryForList("SELECT client_id, storage_key, mime_type, size_bytes FROM creative_media WHERE id = ?", mediaId)
+                .stream().findFirst().orElseThrow(() -> new NotFoundException("Video not found"));
+        access.read((UUID) row.get("client_id"));
+        return new VideoFile(media.path((String) row.get("storage_key")), (String) row.get("mime_type"), (Long) row.get("size_bytes"));
+    }
+
+    public com.aivoice.lead.dto.CreativeDtos.MediaLimits limits() {
+        return new com.aivoice.lead.dto.CreativeDtos.MediaLimits(media.enabled(), media.maxVideoSeconds(), media.maxVideoMb());
+    }
+
     // ------------------------------------------------------------------------------------------------ workflow
 
     public List<AssetSummary> list(UUID clientId, String status) {
@@ -189,9 +270,10 @@ public class CreativeStudioService {
                     : storeImage(clientId, newImage, req.imageMime(), "uploaded", null, null, actor.email());
             int version = (Integer) asset.get("current_version") + 1;
             Timestamp now = now();
-            jdbc.update("INSERT INTO creative_versions (id, asset_id, version, image_id, headline, primary_text, description, "
-                            + "cta, facts, change_note, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?)",
-                    UUID.randomUUID(), assetId, version, imageId,
+            // A new version keeps the video (if any); only the copy, facts or thumbnail change here.
+            jdbc.update("INSERT INTO creative_versions (id, asset_id, version, image_id, video_id, headline, primary_text, description, "
+                            + "cta, facts, change_note, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?)",
+                    UUID.randomUUID(), assetId, version, imageId, cur.get("video_id"),
                     pick(req.headline(), cur.get("headline")), pick(req.primaryText(), cur.get("primary_text")),
                     pick(req.description(), cur.get("description")),
                     req.cta() == null ? cur.get("cta") : blankToNull(req.cta().trim().toUpperCase(Locale.ROOT)),
@@ -326,26 +408,30 @@ public class CreativeStudioService {
 
     // ------------------------------------------------------------------------------------------------ helpers
 
-    private static final String SUMMARY_SQL = "SELECT a.*, v.image_id, v.headline FROM creative_assets a "
-            + "LEFT JOIN creative_versions v ON v.asset_id = a.id AND v.version = a.current_version";
+    private static final String SUMMARY_SQL = "SELECT a.*, v.image_id, v.headline, v.video_id, m.duration_ms FROM creative_assets a "
+            + "LEFT JOIN creative_versions v ON v.asset_id = a.id AND v.version = a.current_version "
+            + "LEFT JOIN creative_media m ON m.id = v.video_id";
 
     private AssetSummary summary(ResultSet rs) throws SQLException {
         return new AssetSummary(rs.getString("id"), rs.getString("client_id"), rs.getString("name"), rs.getString("ad_type"),
                 rs.getString("status"), rs.getInt("current_version"), (Integer) rs.getObject("approved_version"),
                 rs.getString("image_id"), rs.getString("headline"), rs.getString("created_by"),
-                rs.getTimestamp("updated_at").toInstant());
+                rs.getTimestamp("updated_at").toInstant(), rs.getString("media_type"), rs.getString("video_id"),
+                (Integer) rs.getObject("duration_ms"));
     }
 
     private AssetDetail detail(UUID assetId) {
         AssetSummary summary = jdbc.query(SUMMARY_SQL + " WHERE a.id = ?", (rs, i) -> summary(rs), assetId)
                 .stream().findFirst().orElseThrow(() -> new NotFoundException("Creative not found"));
-        List<VersionDto> versions = jdbc.query("SELECT v.*, i.source, i.prompt FROM creative_versions v "
-                        + "LEFT JOIN creative_images i ON i.id = v.image_id WHERE v.asset_id = ? ORDER BY v.version DESC",
+        List<VersionDto> versions = jdbc.query("SELECT v.*, i.source, i.prompt, m.duration_ms FROM creative_versions v "
+                        + "LEFT JOIN creative_images i ON i.id = v.image_id LEFT JOIN creative_media m ON m.id = v.video_id "
+                        + "WHERE v.asset_id = ? ORDER BY v.version DESC",
                 (rs, i) -> new VersionDto(rs.getInt("version"), rs.getString("image_id"), rs.getString("source"),
                         rs.getString("prompt"), rs.getString("headline"), rs.getString("primary_text"),
                         rs.getString("description"), rs.getString("cta"), readFacts(rs.getString("facts")),
                         claimCheck(rs.getString("claim_check")), rs.getString("change_note"), rs.getString("created_by"),
-                        rs.getTimestamp("created_at").toInstant()), assetId);
+                        rs.getTimestamp("created_at").toInstant(), rs.getString("video_id"),
+                        (Integer) rs.getObject("duration_ms")), assetId);
         List<ApprovalDto> approvals = jdbc.query("SELECT * FROM creative_approvals WHERE asset_id = ? ORDER BY decided_at DESC",
                 (rs, i) -> new ApprovalDto(rs.getString("id"), rs.getInt("version"), rs.getString("decision"),
                         rs.getBoolean("claims_acknowledged"), rs.getString("decided_by"),

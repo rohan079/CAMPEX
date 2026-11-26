@@ -27,6 +27,8 @@ public final class CampaignValidator {
             "GET_QUOTE", "APPLY_NOW");
     static final int NAME_MAX = 140;
     static final long MIN_DAILY_BUDGET_MINOR = 100;
+    private static final java.util.regex.Pattern LOCATION_KEY = java.util.regex.Pattern.compile("[A-Za-z0-9_-]{1,64}");
+    private static final Set<String> LOCATION_TYPES = Set.of("city", "region", "country");
     private static final Pattern IPV4 = Pattern.compile("^\\d{1,3}(\\.\\d{1,3}){3}$");
     private static final Pattern AD_ACCOUNT = Pattern.compile("^act_[0-9]{3,32}$");
 
@@ -66,7 +68,7 @@ public final class CampaignValidator {
             errors.add(issue("ad_account_id", "format", "Ad account must look like act_1234567890."));
         } else if (!ctx.mappedAdAccounts().contains(account)) {
             errors.add(issue("ad_account_id", "not_mapped",
-                    "This ad account is not mapped to the client (Tracking → Ad accounts)."));
+                    "This ad account is not linked to this client. Link it in Campaign Studio (Goal step) or Tracking → Ad accounts."));
         }
 
         List<String> platforms = c.platforms() == null ? List.of() : c.platforms();
@@ -76,6 +78,15 @@ public final class CampaignValidator {
         String location = trim(c.location());
         if (location.isEmpty() || location.length() > 160) {
             errors.add(issue("location", "required", "Target location is required (max 160 characters)."));
+        }
+        String locationKey = trim(c.locationKey());
+        if (!locationKey.isEmpty()) {
+            if (!LOCATION_KEY.matcher(locationKey).matches() || !LOCATION_TYPES.contains(trim(c.locationType()))) {
+                errors.add(issue("location", "invalid_key", "Pick the location again from Meta's suggestions."));
+            }
+        } else if (!location.isEmpty()) {
+            warnings.add(issue("location", "unverified", "Location was typed, not picked from Meta's suggestions. "
+                    + "Meta may not match \"" + location + "\"; pick it from the list so the publish can't fail on location."));
         }
         Integer ageMin = c.ageMin();
         Integer ageMax = c.ageMax();
@@ -140,9 +151,13 @@ public final class CampaignValidator {
             }
         }
 
-        warnings.add(issue("ad", "not_created",
-                "Campex creates the campaign and ad set, both paused. The ad itself is not created yet: add the "
-                        + "creative in Ads Manager before activating."));
+        if (!creativeId.isEmpty() && (url.isEmpty() || trim(c.pageId()).isEmpty())) {
+            warnings.add(issue("ad", "not_created", "Campex creates the ad from the approved creative only with a destination URL "
+                    + "and a Facebook Page. Without them, add the ad in Ads Manager."));
+        } else if (creativeId.isEmpty()) {
+            warnings.add(issue("ad", "not_created", "Campex creates the campaign and ad set, both paused. Attach an approved "
+                    + "creative (image or video) and Campex also creates the ad, paused."));
+        }
         return new ValidationReport(errors.isEmpty(), List.copyOf(errors), List.copyOf(warnings));
     }
 

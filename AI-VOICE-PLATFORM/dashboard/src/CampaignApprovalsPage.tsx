@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  approveExecution, cancelExecution, createExecution, getExecution, listExecutions, publishExecution,
-  reconcileExecution, rejectExecution, retryExecution, submitExecution, updateExecution, validateExecution,
+  approveExecution, cancelExecution, checkAd, retryAd, createExecution, getExecution, listExecutions, publishExecution,
+  reconcileExecution, rejectExecution, retryExecution, reviseExecution, submitExecution, updateExecution, validateExecution,
 } from "./executionApi";
+import { LocationPicker } from "./LocationPicker";
 import type {
   CampaignConfig, ExecutionAction, ExecutionDetail, ExecutionStatus, ExecutionSummary, ValidationReport,
 } from "./executionTypes";
@@ -204,8 +205,11 @@ function ExecutionDrawer({ id, onClose, onChanged }: { id: string; onClose: () =
             <ErrorBanner error={error} onDismiss={() => setError(null)} />
             {note && <p className="hint saved" role="status">{note}</p>}
             {ex.last_error && <p className={`notice ${ex.status === "PUBLISHED_PAUSED" ? "warn-notice" : "error"}`}>{ex.last_error}</p>}
+            {detail.ad_status !== "not_requested" && <AdStatusBox detail={detail} busy={busy}
+              onRetry={() => run("ad_retry", () => retryAd(id), "Retrying ad creation.")}
+              onCheck={() => run("ad_check", () => checkAd(id), "Checked with Meta.")} />}
             {ex.status === "PUBLISHED_PAUSED" && (
-              <p className="notice success-notice">Created in Meta as <strong>paused</strong>. Nothing is delivering. Add the ad and review the
+              <p className="notice success-notice">Created in Meta as <strong>paused</strong>. Nothing is delivering. Review the
                 campaign in Ads Manager before activating it.</p>
             )}
 
@@ -240,6 +244,8 @@ function ExecutionDrawer({ id, onClose, onChanged }: { id: string; onClose: () =
                   onPublish={() => setConfirmPublish(true)}
                   onRetry={() => run("retry", () => retryExecution(id), "Checked Meta first, then retried.")}
                   onReconcile={() => run("reconcile", () => reconcileExecution(id), "Checked with Meta.")}
+                  onRevise={() => run("revise", async () => { const r = await reviseExecution(id); setEditing(true); return r; },
+                    "Back in draft. Fix what Meta rejected, then validate and submit it for approval again.")}
                   onCancel={() => { if (window.confirm("Cancel this campaign draft? It will not be published.")) void run("cancel", () => cancelExecution(id), "Cancelled."); }} />
 
                 {rejecting && (
@@ -301,17 +307,38 @@ function ExecutionDrawer({ id, onClose, onChanged }: { id: string; onClose: () =
   );
 }
 
+const AD_STATUS: Record<string, [string, string]> = {
+  pending: ["Waiting to start", "live"], uploading: ["Uploading media to Meta", "live"], processing: ["Meta is processing the video", "live"],
+  creating: ["Creating the ad", "live"], created: ["Ad created (paused)", "good"], failed: ["Ad not created", "bad"], skipped: ["Ad not created by Campex", "neutral"],
+};
+
+function AdStatusBox({ detail, busy, onRetry, onCheck }: { detail: ExecutionDetail; busy: ExecutionAction | null; onRetry: () => void; onCheck: () => void }) {
+  const [label, tone] = AD_STATUS[detail.ad_status] ?? [detail.ad_status, "neutral"];
+  return (
+    <section className="ad-status-box" aria-label="Ad creation">
+      <div><span className="step-label">AD</span> <span className={`pill tone-${tone}`}>{label}</span>
+        {detail.meta_ad_id && <small> · ad {detail.meta_ad_id}</small>}</div>
+      {detail.ad_error && <p className={detail.ad_status === "failed" ? "notice error" : "muted"}>{detail.ad_error}</p>}
+      {detail.ad_status === "processing" && <p className="muted">Meta usually needs a few minutes for a short video. Campex checks every 30 seconds.</p>}
+      <div className="row-actions">
+        {detail.allowed_actions.includes("ad_check") && <button type="button" className="secondary-button" disabled={busy !== null} onClick={onCheck}>Check now</button>}
+        {detail.allowed_actions.includes("ad_retry") && <button type="button" className="primary-button" disabled={busy !== null} onClick={onRetry}>Retry ad creation</button>}
+      </div>
+    </section>
+  );
+}
+
 function ActionBar(props: {
   allowed: Set<ExecutionAction>; busy: ExecutionAction | null; status: ExecutionStatus;
   onValidate: () => void; onSubmit: () => void; onApprove: () => void; onReject: () => void; onPublish: () => void;
-  onRetry: () => void; onReconcile: () => void; onCancel: () => void;
+  onRetry: () => void; onReconcile: () => void; onRevise: () => void; onCancel: () => void;
 }) {
   const { allowed, busy } = props;
   const b = (action: ExecutionAction, label: string, onClick: () => void, cls = "secondary-button") =>
     allowed.has(action) && <button key={action} type="button" className={cls} disabled={busy !== null} onClick={onClick}>
       {busy === action ? "Working…" : label}</button>;
   const primary = allowed.has("publish") ? "publish" : allowed.has("approve") ? "approve" : allowed.has("submit") ? "submit"
-    : allowed.has("retry") ? "retry" : allowed.has("reconcile") && props.status === "EXECUTING" ? "reconcile" : "validate";
+    : allowed.has("revise") ? "revise" : allowed.has("retry") ? "retry" : allowed.has("reconcile") && props.status === "EXECUTING" ? "reconcile" : "validate";
   const cls = (a: ExecutionAction) => (a === primary ? "primary-button" : "secondary-button");
   return (
     <div className="exec-actions">
@@ -320,6 +347,7 @@ function ActionBar(props: {
       {b("approve", "Approve", props.onApprove, cls("approve"))}
       {b("reject", "Request changes", props.onReject)}
       {b("publish", "Publish as paused…", props.onPublish, cls("publish"))}
+      {b("revise", "Edit and resubmit", props.onRevise, cls("revise"))}
       {b("retry", "Check Meta & retry", props.onRetry, cls("retry"))}
       {b("reconcile", props.status === "EXECUTING" ? "Reconcile with Meta" : "Refresh Meta status", props.onReconcile, cls("reconcile"))}
       {b("cancel", "Cancel", props.onCancel, "text-button link-danger")}
@@ -401,7 +429,8 @@ export function ConfigForm({ clientId, initial, submitLabel, busy, onSubmit, onC
             <option value="leads">Leads</option><option value="traffic">Traffic</option><option value="sales">Sales</option><option value="awareness">Awareness</option>
           </select></label>
         <label className="form-field"><span>Daily budget (₹)</span><input required type="number" min={1} step={1} value={budget} onChange={(e) => setBudget(e.target.value)} /></label>
-        <label className="form-field"><span>Location</span><input required maxLength={160} value={c.location} onChange={(e) => set("location", e.target.value)} /></label>
+        <LocationPicker clientId={clientId} required value={{ location: c.location, key: c.location_key ?? null, type: c.location_type ?? null }}
+          onChange={(next) => setC((prev) => ({ ...prev, location: next.location, location_key: next.key, location_type: next.type }))} />
         <div className="form-field"><span>Ages</span><div className="age-range-fields">
           <input aria-label="Minimum age" type="number" min={18} max={65} value={c.age_min} onChange={(e) => set("age_min", Number(e.target.value))} />
           <input aria-label="Maximum age" type="number" min={18} max={65} value={c.age_max} onChange={(e) => set("age_max", Number(e.target.value))} /></div></div>

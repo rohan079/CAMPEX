@@ -7,17 +7,19 @@ import { CreativeStudioPage } from "../../src/CreativeStudioPage";
 vi.mock("../../src/creativeApi", () => ({
   generateCopy: vi.fn(), generateArtwork: vi.fn(), uploadArtwork: vi.fn(), listCreatives: vi.fn(), getCreative: vi.fn(),
   editCreative: vi.fn(), submitCreative: vi.fn(), approveCreative: vi.fn(), rejectCreative: vi.fn(), archiveCreative: vi.fn(),
-  creativeImage: vi.fn(), fileToBase64: vi.fn(),
+  creativeImage: vi.fn(), fileToBase64: vi.fn(), creativeVideo: vi.fn(), uploadVideoCreative: vi.fn(),
+  getMediaLimits: vi.fn(async () => ({ video_enabled: true, max_video_seconds: 60, max_video_mb: 200 })),
 }));
 const m = vi.mocked(api);
 
 function detail(status: CreativeStatus, over: Partial<CreativeDetail["versions"][number]> = {}, allowed: CreativeDetail["allowed_actions"] = ["edit", "submit", "archive"]): CreativeDetail {
   return {
     asset: { id: "cr1", client_id: "c1", name: "Diwali villas", ad_type: "villa", status, current_version: 2, approved_version: null,
-      image_id: "img1", headline: "East-facing villas", created_by: "asha.manager@example.com", updated_at: "2026-11-20T10:00:00Z" },
+      image_id: "img1", headline: "East-facing villas", created_by: "asha.manager@example.com", updated_at: "2026-11-20T10:00:00Z",
+      media_type: "image", video_id: null, video_duration_ms: null },
     versions: [{ version: 2, image_id: "img1", image_source: "ai_generated", image_prompt: "Villa at dawn", headline: "East-facing villas",
       primary_text: "Visit the model villa.", description: null, cta: "LEARN_MORE", facts: ["3 BHK villas from ₹85 lakh"], claim_check: null,
-      change_note: null, created_by: "asha.manager@example.com", created_at: "2026-11-20T10:00:00Z", ...over }],
+      change_note: null, created_by: "asha.manager@example.com", created_at: "2026-11-20T10:00:00Z", video_id: null, video_duration_ms: null, ...over }],
     approvals: [], allowed_actions: allowed,
   };
 }
@@ -82,5 +84,21 @@ describe("Creative studio", () => {
     expect((within(dialog).getByRole("button", { name: "Submit for review" }) as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(within(dialog).getByRole("button", { name: "Save new version" }));
     await waitFor(() => expect(m.editCreative).toHaveBeenCalledWith("cr1", expect.objectContaining({ headline: "New headline" })));
+  });
+
+  it("shows video creatives with their length and plays them on demand", async () => {
+    const video = detail("APPROVED", { video_id: "vid1", video_duration_ms: 45000 }, ["edit", "archive"]);
+    m.listCreatives.mockResolvedValue([{ ...video.asset, media_type: "video", video_id: "vid1", video_duration_ms: 45000 }]);
+    m.getCreative.mockResolvedValue(video);
+    m.creativeVideo.mockResolvedValue(new Blob(["v"], { type: "video/mp4" }));
+    render(<CreativeStudioPage clientId="c1" />);
+    expect(await screen.findByText("▶ 0:45")).toBeTruthy();
+    fireEvent.click(screen.getByRole("tab", { name: "Artwork" }));
+    expect(await screen.findByText(/up to 60 s · 200 MB/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Open Diwali villas" }));
+    const dialog = await screen.findByRole("dialog", { name: "Diwali villas" });
+    fireEvent.click(await within(dialog).findByRole("button", { name: "Play Diwali villas" }));
+    await waitFor(() => expect(m.creativeVideo).toHaveBeenCalledWith("vid1"));
+    expect(await within(dialog).findByLabelText("Diwali villas")).toBeTruthy();
   });
 });

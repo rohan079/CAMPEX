@@ -84,6 +84,36 @@ public class CreativeStudioController {
         return creative.archive(asset(id));
     }
 
+    @GetMapping("/api/creative/media-limits")
+    public com.aivoice.lead.dto.CreativeDtos.MediaLimits limits() {
+        return creative.limits();
+    }
+
+    @PostMapping(path = "/api/clients/{clientId}/creative/videos", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public AssetDetail uploadVideo(@PathVariable String clientId,
+                                   @org.springframework.web.bind.annotation.RequestPart("video") org.springframework.web.multipart.MultipartFile video,
+                                   @org.springframework.web.bind.annotation.RequestPart("thumbnail") org.springframework.web.multipart.MultipartFile thumbnail,
+                                   @org.springframework.web.bind.annotation.RequestParam("name") String name,
+                                   @org.springframework.web.bind.annotation.RequestParam(name = "ad_type", required = false) String adType,
+                                   @org.springframework.web.bind.annotation.RequestParam(name = "facts", required = false) List<String> facts) {
+        return creative.uploadVideo(Ids.uuid(clientId, "Client"), name, adType, facts, video, thumbnail);
+    }
+
+    /**
+     * Streams a stored video. Spring MVC answers Range requests for {@code Resource} bodies with 206 partial content,
+     * so browsers can seek without downloading the whole file.
+     */
+    @GetMapping("/api/creative/videos/{mediaId}")
+    public ResponseEntity<org.springframework.core.io.Resource> video(@PathVariable String mediaId) {
+        var file = creative.video(Ids.uuid(mediaId, "Video"));
+        return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType(file.mimeType()))
+                .cacheControl(CacheControl.noStore())
+                .header("Accept-Ranges", "bytes")
+                .header("X-Content-Type-Options", "nosniff")
+                .body(new org.springframework.core.io.FileSystemResource(file.path()));
+    }
+
     @GetMapping("/api/creative/images/{imageId}")
     public ResponseEntity<byte[]> image(@PathVariable String imageId) {
         ImageBytes image = creative.image(Ids.uuid(imageId, "Image"));

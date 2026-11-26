@@ -116,6 +116,12 @@ class MetaCampaignPublishRequest(BaseModel):
     page_id: str | None = Field(default=None, max_length=64)
     daily_budget_minor: int | None = Field(default=None, ge=100)
     confirmed: bool
+    geo_key: str | None = Field(default=None, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")
+    geo_type: Literal["city", "region", "country"] | None = None
+
+
+class MetaLocationSearchRequest(BaseModel):
+    query: str = Field(min_length=2, max_length=100)
 
 
 class MetaCampaignLookupRequest(BaseModel):

@@ -256,6 +256,59 @@ class CampaignExecutionIntegrationTest {
     }
 
     @Test
+    void rejectedLocationIsRevisedReapprovedAndPublishedWithTheExactMetaPlace() throws Exception {
+        when(meta.publish(anyString(), any())).thenThrow(new GatewayException(
+                "Meta could not match the target location. Choose a more specific city, region, or country.", null));
+        when(meta.findByNameFragment(anyString(), anyString(), anyString())).thenReturn(List.of());
+        String id = approved("Bad place");
+        JsonNode failed = publish(id);
+        assertThat(failed.at("/execution/status").asText()).isEqualTo("FAILED");
+        assertThat(failed.get("allowed_actions").toString()).contains("revise");
+        as("viewer@a.test", post("/api/campaign-executions/" + id + "/revise"), null).andExpect(status().isForbidden());
+
+        JsonNode draft = ok(as("manager@a.test", post("/api/campaign-executions/" + id + "/revise"), null));
+        assertThat(draft.at("/execution/status").asText()).isEqualTo("DRAFT");
+        assertThat(draft.get("allowed_actions").toString()).contains("edit").doesNotContain("revise", "publish");
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM campaign_approvals WHERE execution_id = ? "
+                + "AND decision = 'approved' AND invalidated_at IS NULL", Integer.class, UUID.fromString(id))).isZero();
+
+        when(meta.searchLocations(TOKEN, "Guntur")).thenReturn(List.of(new com.aivoice.lead.dto.CampaignExecutionDtos.MetaLocation(
+                "1035921", "city", "Guntur", "Andhra Pradesh", "India", "Guntur, Andhra Pradesh, India")));
+        JsonNode found = ok(as("manager@a.test", get("/api/clients/" + clientA + "/meta/locations?q=Guntur"), null));
+        assertThat(found.at("/locations/0/label").asText()).isEqualTo("Guntur, Andhra Pradesh, India");
+        as("viewer@a.test", get("/api/clients/" + clientA + "/meta/locations?q=Guntur"), null).andExpect(status().isForbidden());
+
+        String exact = config(50_000, "Bad place").replace("\"location\":\"Guntur\"",
+                "\"location\":\"Guntur, Andhra Pradesh, India\",\"location_key\":\"1035921\",\"location_type\":\"city\"");
+        ok(as("manager@a.test", put("/api/campaign-executions/" + id), exact));
+        JsonNode report = ok(as("manager@a.test", post("/api/campaign-executions/" + id + "/validate"), null));
+        assertThat(report.get("valid").asBoolean()).isTrue();
+        assertThat(report.get("warnings").toString()).doesNotContain("unverified");
+        ok(as("manager@a.test", post("/api/campaign-executions/" + id + "/submit"), null));
+        ok(as("manager@a.test", post("/api/campaign-executions/" + id + "/approve"), "{\"note\":\"ok\"}"));
+
+        org.mockito.Mockito.reset(meta);
+        when(meta.status(anyString(), anyString(), anyString())).thenReturn(new CampaignState("PAUSED", "PAUSED"));
+        when(meta.findByNameFragment(anyString(), anyString(), anyString())).thenReturn(List.of());
+        when(meta.publish(anyString(), any())).thenReturn(new PublishResult(RUN + "6601", RUN + "6602", null, "PAUSED", null));
+        assertThat(publish(id).at("/execution/status").asText()).isEqualTo("PUBLISHED_PAUSED");
+        ArgumentCaptor<PublishCommand> sent = ArgumentCaptor.forClass(PublishCommand.class);
+        verify(meta).publish(eq(TOKEN), sent.capture());
+        assertThat(sent.getValue().geoKey()).isEqualTo("1035921");
+        assertThat(sent.getValue().geoType()).isEqualTo("city");
+    }
+
+    @Test
+    void typedLocationWarnsAndOldConfigsKeepTheirHash() throws Exception {
+        JsonNode created = ok(as("manager@a.test", post("/api/clients/" + clientA + "/campaign-executions"), config(50_000, "Typed")));
+        String id = created.at("/execution/id").asText();
+        JsonNode report = ok(as("manager@a.test", post("/api/campaign-executions/" + id + "/validate"), null));
+        assertThat(report.get("warnings").toString()).contains("unverified");
+        String stored = jdbc.queryForObject("SELECT config::text FROM campaign_executions WHERE id = ?", String.class, UUID.fromString(id));
+        assertThat(stored).doesNotContain("location_key").doesNotContain("location_type");
+    }
+
+    @Test
     void unconfirmedOutcomeStaysExecutingUntilReconciled() throws Exception {
         when(meta.publish(anyString(), any())).thenThrow(new GatewayException("Meta MCP service did not respond", null));
         String id = approved("Unknown");

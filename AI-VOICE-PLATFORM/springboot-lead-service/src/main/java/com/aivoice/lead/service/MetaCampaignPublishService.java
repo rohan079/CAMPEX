@@ -55,7 +55,9 @@ public class MetaCampaignPublishService {
                 adAccount.id(),
                 request.pageId(),
                 request.dailyBudgetMinor(),
-                true);
+                true,
+                request.geoKey(),
+                request.geoType());
         MetaCampaignPublishResponse response = voice.publishMetaCampaign(ownedRequest, accessToken);
         return response;
     }

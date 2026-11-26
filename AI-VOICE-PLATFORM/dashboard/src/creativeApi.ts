@@ -1,4 +1,4 @@
-import { request, requestBlob } from "./api";
+import { request, requestBlob, uploadForm } from "./api";
 import type { CopyBrief, CopySuggestions, CreativeDetail, CreativeEdit, CreativeSummary } from "./creativeTypes";
 
 /** Phase 3 Creative Studio endpoints. Generated artwork is stored by Campex; nothing here touches Meta. */
@@ -22,6 +22,20 @@ export const approveCreative = (id: string, claimsAcknowledged: boolean, note?: 
 export const rejectCreative = (id: string, note: string) => request<CreativeDetail>(`${a(id)}/reject`, post({ note }));
 export const archiveCreative = (id: string) => request<CreativeDetail>(`${a(id)}/archive`, post());
 export const creativeImage = (imageId: string) => requestBlob(`/api/creative/images/${encodeURIComponent(imageId)}`);
+
+export const getMediaLimits = () => request<{ video_enabled: boolean; max_video_seconds: number; max_video_mb: number }>("/api/creative/media-limits");
+export const creativeVideo = (mediaId: string) => requestBlob(`/api/creative/videos/${encodeURIComponent(mediaId)}`);
+
+export function uploadVideoCreative(clientId: string, input: { name: string; adType: string; facts: string[]; video: File; thumbnail: Blob },
+  onProgress?: (fraction: number) => void) {
+  const form = new FormData();
+  form.append("name", input.name);
+  form.append("ad_type", input.adType);
+  input.facts.forEach((f) => form.append("facts", f));
+  form.append("video", input.video, input.video.name);
+  form.append("thumbnail", input.thumbnail, "thumbnail.png");
+  return uploadForm<CreativeDetail>(`${c(clientId)}/videos`, form, onProgress);
+}
 
 /** Reads a File as base64 (without the data: prefix). */
 export function fileToBase64(file: File): Promise<string> {
