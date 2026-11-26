@@ -179,7 +179,7 @@ class CreativeStudioIntegrationTest {
         ok(as("m@c.test", post("/api/creative/assets/" + id + "/submit"), null));
         int version = ok(as("m@c.test", post("/api/creative/assets/" + id + "/approve"), "{}")).at("/asset/approved_version").asInt();
         String base = "{\"ad_account_id\":\"" + ACCOUNT + "\",\"name\":\"With creative\",\"objective\":\"leads\",\"platforms\":[\"facebook\"],"
-                + "\"location\":\"Guntur\",\"age_min\":25,\"age_max\":55,\"daily_budget_minor\":50000,\"cta\":\"LEARN_MORE\","
+                + "\"location\":\"Guntur\",\"age_min\":25,\"age_max\":55,\"daily_budget_minor\":50000,\"cta\":\"LEARN_MORE\",\"page_id\":\"42\","
                 + "\"creative_asset_id\":\"" + id + "\",\"creative_version\":" + version + ",";
         String good = base + "\"headline\":\"East-facing villas\",\"primary_text\":\"Book a site visit this weekend\"}";
         String changed = base + "\"headline\":\"East-facing villas!!\",\"primary_text\":\"Book a site visit this weekend\"}";

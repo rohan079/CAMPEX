@@ -119,7 +119,8 @@ export function studioIssues(f: StudioForm, policy: BudgetPolicy | null, mappedA
   if (!f.name.trim()) e("goal", "Name the campaign.");
   if (!f.adAccountId) e("goal", "Choose the Meta ad account.");
   if (mappedAccount === false) e("goal", "This ad account isn't linked to the client yet. Link it on the Goal step.");
-  if (!f.pageId) w("goal", "No Facebook Page selected; Meta needs one for the ad.");
+  if (!f.pageId && f.objective === "leads") e("goal", "Leads campaigns need a Facebook Page. Select the Page the ads run as.");
+  else if (!f.pageId) w("goal", "No Facebook Page selected; Meta needs one for the ad.");
   if (!f.location.trim()) e("audience", "Add a target location.");
   else if (!f.locationKey) w("audience", "Pick the location from Meta's suggestions, or Meta may reject the publish.");
   if (f.ageMax < f.ageMin) e("audience", "Maximum age is below minimum age.");
@@ -137,7 +138,7 @@ export function studioIssues(f: StudioForm, policy: BudgetPolicy | null, mappedA
   if (needsUrl && !f.url.trim()) e("ad", "Traffic and sales campaigns need a destination URL.");
   if (f.url.trim() && !/^https:\/\/[^\s/]+\.[^\s]+/i.test(f.url.trim())) e("ad", "The destination must be a public https:// link.");
   if (!f.creativeId) w("ad", "No approved creative attached: the copy hasn't been through creative review.");
-  if (f.objective === "sales") w("goal", "Sales optimizes for website conversions; make sure the Campex pixel is installed.");
+  if (f.objective === "sales") e("goal", "Sales campaigns need a Meta Pixel conversion event, which Campex can't set up yet. Use Leads or Traffic.");
   return out;
 }
 
@@ -416,9 +417,10 @@ export function CampaignStudio({ client, onOpenChannels, onOpenApprovals }: {
               <div className="objective-grid" role="radiogroup" aria-label="Objective">
                 {(Object.keys(OBJECTIVES) as Objective[]).map((o) => (
                   <button key={o} type="button" role="radio" aria-checked={form.objective === o}
-                    className={`objective-card${form.objective === o ? " selected" : ""}`} onClick={() => set("objective", o)}>
+                    className={`objective-card${form.objective === o ? " selected" : ""}`} onClick={() => set("objective", o)}
+                    disabled={o === "sales"} title={o === "sales" ? "Needs a Meta Pixel conversion event; not available yet" : undefined}>
                     <span className="objective-icon">{OBJECTIVES[o].icon}</span><strong>{OBJECTIVES[o].label}</strong>
-                    <small>{OBJECTIVES[o].bestFor}</small>
+                    <small>{o === "sales" ? "Coming soon: needs a Meta Pixel conversion event" : OBJECTIVES[o].bestFor}</small>
                   </button>))}
               </div>
               <dl className="facts objective-facts">

@@ -62,6 +62,11 @@ public final class CampaignValidator {
         }
         if (!OBJECTIVES.contains(trim(c.objective()))) {
             errors.add(issue("objective", "unsupported", "Objective must be one of leads, traffic, sales, awareness."));
+        } else if ("sales".equals(trim(c.objective()))) {
+            errors.add(issue("objective", "needs_pixel", "Sales campaigns need a Meta Pixel conversion event, which Campex "
+                    + "does not set up yet. Use Leads or Traffic."));
+        } else if ("leads".equals(trim(c.objective())) && trim(c.pageId()).isEmpty()) {
+            errors.add(issue("page_id", "required", "Leads campaigns need a Facebook Page. Select the Page the ads run as."));
         }
         String account = trim(c.adAccountId());
         if (!AD_ACCOUNT.matcher(account).matches()) {
