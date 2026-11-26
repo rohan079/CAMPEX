@@ -49,7 +49,7 @@ public class AppConfig implements WebMvcConfigurer {
         registry.addMapping("/api/**")
                 .allowedOrigins(origins)
                 .allowedMethods("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS")
-                .allowedHeaders("Content-Type", "X-Ad-Popup-Token");
+                .allowedHeaders("Content-Type", "Authorization", "Idempotency-Key", "X-Ad-Popup-Token");
         registry.addMapping("/health")
                 .allowedOrigins(origins)
                 .allowedMethods("GET", "OPTIONS")

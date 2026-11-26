@@ -1,5 +1,5 @@
 import { request } from "./api";
-import type { AppNotification, CampaignConfig, ExecutionDetail, ExecutionSummary, ValidationReport } from "./executionTypes";
+import type { AppNotification, CampaignConfig, ExecutionDetail, ExecutionSummary, MetaLocation, ValidationReport } from "./executionTypes";
 
 /** Phase 3 execution endpoints. Publishing always creates PAUSED objects and requires a recorded approval. */
 
@@ -20,9 +20,15 @@ export const submitExecution = (id: string) => request<ExecutionDetail>(`${e(id)
 export const approveExecution = (id: string, note?: string) => request<ExecutionDetail>(`${e(id)}/approve`, post({ note }));
 export const rejectExecution = (id: string, note: string) => request<ExecutionDetail>(`${e(id)}/reject`, post({ note }));
 export const publishExecution = (id: string) => request<ExecutionDetail>(`${e(id)}/publish`, post({ confirm: true }));
+export const reviseExecution = (id: string) => request<ExecutionDetail>(`${e(id)}/revise`, post());
+export const searchMetaLocations = (clientId: string, q: string) =>
+  request<{ locations: MetaLocation[] }>(`/api/clients/${encodeURIComponent(clientId)}/meta/locations?q=${encodeURIComponent(q)}`);
 export const retryExecution = (id: string) => request<ExecutionDetail>(`${e(id)}/retry`, post());
 export const reconcileExecution = (id: string) => request<ExecutionDetail>(`${e(id)}/reconcile`, post());
 export const cancelExecution = (id: string) => request<ExecutionDetail>(`${e(id)}/cancel`, post());
+
+export const retryAd = (id: string) => request<ExecutionDetail>(`${e(id)}/ad/retry`, post());
+export const checkAd = (id: string) => request<ExecutionDetail>(`${e(id)}/ad/check`, post());
 
 export const listNotifications = (unread = false) =>
   request<{ items: AppNotification[]; unread_count: number }>(`/api/notifications${unread ? "?unread=true" : ""}`);

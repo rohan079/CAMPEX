@@ -361,3 +361,53 @@ def test_campaign_statuses_are_read_only_and_token_free(client):
     assert response.status_code == 200
     assert response.json() == {"campaigns": [{"id": "1", "name": "Villas", "status": "ACTIVE", "effective_status": "WITH_ISSUES"}]}
     assert "secret-token" not in response.text
+
+
+class FakeBuilder:
+    def __init__(self):
+        self.calls = []
+
+    async def create_ad(self, token, account, adset, creative, name):
+        self.calls.append(("ad", token, adset, creative))
+        return "999"
+
+    async def upload_video(self, token, account, name, stream, size, mime):
+        self.calls.append(("video", token, mime, stream.read()))
+        return "777"
+
+
+def test_ad_builder_routes_need_service_key_token_and_confirmation(client):
+    fake = FakeBuilder()
+    app.state.meta_ad_builder = fake
+    body = {"ad_account_id": "act_5", "adset_id": "55", "creative_id": "888", "name": "Villa", "confirmed": True}
+    assert client.post("/api/meta/ads-builder/ad", json=body, headers={"X-Meta-Access-Token": "t"}).status_code == 401
+    assert client.post("/api/meta/ads-builder/ad", json=body, headers=KEY).status_code == 401
+    assert client.post("/api/meta/ads-builder/ad", json={**body, "confirmed": False}, headers={**KEY, "X-Meta-Access-Token": "t"}).status_code == 400
+    response = client.post("/api/meta/ads-builder/ad", json=body, headers={**KEY, "X-Meta-Access-Token": "private"})
+    assert response.json() == {"ad_id": "999", "status": "PAUSED"}
+    assert "private" not in response.text
+    video = client.post("/api/meta/ads-builder/video", headers={**KEY, "X-Meta-Access-Token": "t"},
+                        data={"ad_account_id": "act_5", "name": "Tour"}, files={"file": ("tour.mp4", b"abc", "video/mp4")})
+    assert video.json() == {"video_id": "777"}
+    bad = client.post("/api/meta/ads-builder/video", headers={**KEY, "X-Meta-Access-Token": "t"},
+                      data={"ad_account_id": "act_5", "name": "Tour"}, files={"file": ("x.exe", b"abc", "application/octet-stream")})
+    assert bad.status_code == 400
+    assert ("video", "t", "video/mp4", b"abc") in fake.calls
+
+
+def test_meta_location_search_route_needs_token_and_returns_rows(client):
+    from fastmcp import FastMCP
+
+    test_mcp = FastMCP("test-meta-locations")
+
+    @test_mcp.tool
+    async def search_ad_locations(query: str, access_token: str) -> list[dict]:
+        return [{"key": "1035921", "type": "city", "name": "Guntur", "label": "Guntur, Andhra Pradesh, India"}]
+
+    app.state.meta_ads_mcp = test_mcp
+    assert client.post("/api/meta/locations", json={"query": "Gun"}, headers=KEY).status_code == 401
+    response = client.post("/api/meta/locations", json={"query": "Gun"},
+                           headers={**KEY, "X-Meta-Access-Token": "private-token"})
+    assert response.status_code == 200
+    assert response.json()["locations"][0]["label"] == "Guntur, Andhra Pradesh, India"
+    assert "private-token" not in response.text

@@ -1,3 +1,5 @@
+import json
+
 import httpx
 import pytest
 from fastmcp import Client
@@ -278,3 +280,62 @@ def test_write_tools_stay_out_of_the_ai_allowlist():
     from services.campaign_assistant import READ_ONLY_META_TOOLS
 
     assert "apply_object_change" not in READ_ONLY_META_TOOLS
+
+
+def _campaign_args(**overrides):
+    args = {
+        "ad_account_id": "act_123", "name": "Spring homes", "objective": "leads", "location": "Vijayawada",
+        "age_min": 18, "age_max": 65, "platforms": ["facebook"], "daily_budget_minor": 50000,
+        "confirmed": True, "access_token": "sensitive-token",
+    }
+    args.update(overrides)
+    return args
+
+
+def _location_handler(search_rows, seen):
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/me/adaccounts"):
+            return httpx.Response(200, json={"data": [{"id": "act_123"}]})
+        if request.url.path.endswith("/search"):
+            q = request.url.params.get("q")
+            seen.setdefault("queries", []).append(q)
+            return httpx.Response(200, json={"data": search_rows(q)})
+        if request.url.path.endswith("/act_123/campaigns"):
+            return httpx.Response(200, json={"id": "campaign-1"})
+        if request.url.path.endswith("/act_123/adsets"):
+            seen["targeting"] = json.loads(dict(httpx.QueryParams(request.content.decode()))["targeting"])
+            return httpx.Response(200, json={"id": "adset-1"})
+        raise AssertionError(f"Unexpected Graph request path: {request.url.path}")
+    return handler
+
+
+GUNTUR = {"key": "1035921", "type": "city", "name": "Guntur", "region": "Andhra Pradesh", "country_name": "India"}
+GUNTUR_OTHER = {"key": "999", "type": "city", "name": "Guntur", "region": "Elsewhere", "country_name": "India"}
+
+
+@pytest.mark.asyncio
+async def test_location_with_region_falls_back_to_place_search_and_filters():
+    seen: dict = {}
+    rows = lambda q: [] if "," in q else [GUNTUR, GUNTUR_OTHER]  # noqa: E731
+    server = create_meta_ads_mcp(Settings(meta_graph_api_version="v27.0"), httpx.MockTransport(_location_handler(rows, seen)))
+    async with Client(server) as client:
+        await client.call_tool("create_paused_campaign", _campaign_args(location="Guntur, Andhra Pradesh"))
+    assert seen["queries"] == ["Guntur, Andhra Pradesh", "Guntur"]
+    assert seen["targeting"]["geo_locations"] == {"cities": [{"key": "1035921"}]}
+
+
+@pytest.mark.asyncio
+async def test_exact_geo_key_skips_search_and_ambiguity_lists_options():
+    seen: dict = {}
+    server = create_meta_ads_mcp(Settings(meta_graph_api_version="v27.0"),
+                                 httpx.MockTransport(_location_handler(lambda q: [GUNTUR, GUNTUR_OTHER], seen)))
+    async with Client(server) as client:
+        await client.call_tool("create_paused_campaign", _campaign_args(location="Andhra Pradesh, India",
+                                                                        geo_key="1234", geo_type="region"))
+        assert "queries" not in seen
+        assert seen["targeting"]["geo_locations"] == {"regions": [{"key": "1234"}]}
+        with pytest.raises(ToolError, match="matches several places.*Guntur, Andhra Pradesh, India"):
+            await client.call_tool("create_paused_campaign", _campaign_args(location="Guntur"))
+        found = await client.call_tool("search_ad_locations", {"query": "Gun", "access_token": "sensitive-token"})
+    labels = [row["label"] for row in tool_payload(found)]
+    assert labels == ["Guntur, Andhra Pradesh, India", "Guntur, Elsewhere, India"]

@@ -1816,3 +1816,71 @@ input[readonly], textarea[readonly] { background: var(--surface-2); color: var(-
 /* Below the 3-column layout the preview row sits under the steps; a sticky step list would float over it. */
 @media (max-width: 1280px) { .studio-steps { position: static; } }
 .mock.story { width: 100%; justify-self: center; }
+
+/* ---------------------------------------------------------------- Video creatives */
+.thumb-wrap { position: relative; display: block; }
+.video-badge { position: absolute; right: 8px; bottom: 8px; padding: 2px 8px; border-radius: 99px; color: #fff; background: rgba(15, 18, 32, .75); font-size: .72rem; font-weight: 650; }
+.video-poster { position: relative; display: grid; place-items: center; overflow: hidden; background: #111; }
+.video-poster .video-poster-image { width: 100%; height: 100%; object-fit: cover; opacity: .85; }
+.video-poster .img-placeholder { width: 100%; height: 100%; }
+.play-button { position: absolute; width: 54px; height: 54px; border: 0; border-radius: 50%; color: #111; background: rgba(255,255,255,.92); box-shadow: var(--shadow-lg); font-size: 1.2rem; cursor: pointer; }
+.play-button:hover { transform: scale(1.05); }
+.video-error { position: absolute; bottom: 8px; padding: 2px 8px; border-radius: 6px; color: #fff; background: rgba(155, 44, 61, .9); font-size: .74rem; }
+video.ad-preview-image, video.mock-image { background: #000; object-fit: contain; }
+.mock.story video.mock-image { position: absolute; inset: 0; height: 100%; }
+.video-upload { display: grid; gap: 10px; padding: 12px; border: 1px dashed var(--border-strong); border-radius: var(--radius); }
+.video-chosen { display: grid; grid-template-columns: 96px 1fr auto; gap: 12px; align-items: center; }
+.video-chosen img { width: 96px; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 8px; background: #000; }
+.video-chosen > div { display: grid; gap: 4px; min-width: 0; }
+.video-chosen strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.video-chosen small { color: var(--text-3); }
+.upload-progress { height: 6px; overflow: hidden; border-radius: 99px; background: var(--brand-50); }
+.upload-progress span { display: block; height: 100%; background: var(--brand); transition: width 160ms; }
+.ad-status-box { display: grid; gap: 8px; padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface-2); }
+.ad-status-box p { margin: 0; font-size: .84rem; }
+@media (max-width: 680px) { .video-chosen { grid-template-columns: 72px 1fr; } .video-chosen button { grid-column: 1 / -1; } }
+
+.field-fix {
+  display: block;
+  margin-top: 6px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: color-mix(in srgb, #d97706 12%, transparent);
+  color: inherit;
+  font-size: 0.85rem;
+  line-height: 1.4;
+}
+
+.location-picker { position: relative; }
+.location-picker > label { display: contents; }
+.location-input-wrap { position: relative; }
+.location-input-wrap input { width: 100%; }
+.location-options {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  max-height: 260px;
+  overflow-y: auto;
+  border: 1px solid var(--border, rgba(127, 127, 127, 0.3));
+  border-radius: 10px;
+  background: var(--surface, #fff);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.14);
+}
+.location-options li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 10px;
+  border-radius: 7px;
+  cursor: pointer;
+}
+.location-options li small { opacity: 0.65; white-space: nowrap; }
+.location-options li:hover, .location-options li.active { background: color-mix(in srgb, currentColor 8%, transparent); }
+.location-status { display: block; margin-top: 6px; font-size: 0.82rem; opacity: 0.8; }
+.location-status.ok { color: #15803d; opacity: 1; }
+.location-status.warn { color: #b45309; opacity: 1; }

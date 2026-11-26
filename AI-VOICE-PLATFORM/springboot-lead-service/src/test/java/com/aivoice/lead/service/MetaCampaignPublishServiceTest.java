@@ -57,6 +57,7 @@ class MetaCampaignPublishServiceTest {
     private static MetaCampaignPublishRequest request(boolean confirmed, String adAccountId) {
         return new MetaCampaignPublishRequest(
                 "Spring homes", "leads", List.of("facebook"), "Vijayawada", 18, 65,
-                "New homes", "Verified listing details", "Learn more", adAccountId, "page-1", 50_000, confirmed);
+                "New homes", "Verified listing details", "Learn more", adAccountId, "page-1", 50_000, confirmed,
+                null, null);
     }
 }

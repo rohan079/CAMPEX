@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  approveCreative, archiveCreative, creativeImage, editCreative, fileToBase64, generateArtwork, generateCopy, getCreative,
-  listCreatives, rejectCreative, submitCreative, uploadArtwork,
+  approveCreative, archiveCreative, creativeImage, creativeVideo, editCreative, fileToBase64, generateArtwork, generateCopy, getCreative,
+  getMediaLimits, listCreatives, rejectCreative, submitCreative, uploadArtwork, uploadVideoCreative,
 } from "./creativeApi";
 import {
   AD_TYPES, type ClaimCheck, type CopySuggestions, type CreativeAction, type CreativeDetail, type CreativeStatus,
@@ -45,6 +45,55 @@ export function AuthImage({ imageId, alt, className }: { imageId: string | null;
   if (!imageId || failed) return <div className={`img-placeholder ${className ?? ""}`}>{failed ? "Image unavailable" : "No artwork"}</div>;
   if (!url) return <div className={`img-placeholder loading ${className ?? ""}`} aria-label="Loading image" />;
   return <img className={className} src={url} alt={alt} />;
+}
+
+export function formatDuration(ms: number | null | undefined): string {
+  if (!ms) return "";
+  const total = Math.round(ms / 1000);
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
+}
+
+/** Plays a stored video. It is fetched only when someone presses play (videos can be large). */
+export function AuthVideo({ videoId, posterId, className, label }: { videoId: string; posterId: string | null; className?: string; label: string }) {
+  const [url, setUrl] = useState<string | null>(null);
+  const [state, setState] = useState<"idle" | "loading" | "error">("idle");
+  useEffect(() => () => { if (url) URL.revokeObjectURL(url); }, [url]);
+  if (url) return <video className={className} src={url} controls autoPlay playsInline aria-label={label} />;
+  return (
+    <div className={`video-poster ${className ?? ""}`}>
+      <AuthImage imageId={posterId} alt="" className="video-poster-image" />
+      <button type="button" className="play-button" aria-label={`Play ${label}`} disabled={state === "loading"}
+        onClick={() => {
+          setState("loading");
+          creativeVideo(videoId).then((blob) => setUrl(URL.createObjectURL(blob))).catch(() => setState("error"));
+        }}>{state === "loading" ? "…" : "▶"}</button>
+      {state === "error" && <span className="video-error">Video unavailable</span>}
+    </div>
+  );
+}
+
+/** Reads duration and captures a thumbnail frame in the browser (Meta needs a thumbnail for video ads). */
+export function inspectVideo(file: File): Promise<{ durationMs: number; thumbnail: Blob }> {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const video = document.createElement("video");
+    video.preload = "metadata";
+    video.muted = true;
+    video.playsInline = true;
+    const done = (fn: () => void) => { fn(); URL.revokeObjectURL(url); };
+    video.onerror = () => done(() => reject(new Error("This video can't be read by the browser. Export it as H.264 MP4.")));
+    video.onloadedmetadata = () => { video.currentTime = Math.min(1, (video.duration || 1) / 2); };
+    video.onseeked = () => {
+      const scale = Math.min(1, 1080 / Math.max(video.videoWidth, 1));
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(1, Math.round(video.videoWidth * scale));
+      canvas.height = Math.max(1, Math.round(video.videoHeight * scale));
+      canvas.getContext("2d")?.drawImage(video, 0, 0, canvas.width, canvas.height);
+      canvas.toBlob((blob) => done(() => blob ? resolve({ durationMs: Math.round(video.duration * 1000), thumbnail: blob })
+        : reject(new Error("Could not capture a thumbnail from the video."))), "image/png");
+    };
+    video.src = url;
+  });
 }
 
 export function ClaimCheckNotice({ check }: { check: ClaimCheck | null }) {
@@ -125,7 +174,8 @@ export function CreativeStudioPage({ clientId }: { clientId?: string }) {
           <div className="creative-library">
             {visible.map((item) => (
               <button key={item.id} type="button" className="creative-tile" onClick={() => setOpenId(item.id)} aria-label={`Open ${item.name}`}>
-                <AuthImage imageId={item.image_id} alt="" className="creative-thumb" />
+                <span className="thumb-wrap"><AuthImage imageId={item.image_id} alt="" className="creative-thumb" />
+                  {item.media_type === "video" && <span className="video-badge">▶ {formatDuration(item.video_duration_ms)}</span>}</span>
                 <span className="creative-tile-body"><strong>{item.name}</strong>
                   <span className="creative-tile-meta"><CreativeStatusPill status={item.status} /><small>v{item.current_version}{item.approved_version ? ` · approved v${item.approved_version}` : ""}</small></span>
                   {item.headline && <small className="clamp">{item.headline}</small>}</span>
@@ -218,6 +268,39 @@ function ArtworkMaker({ clientId, adType, facts, prompt, onPrompt, chosen, onErr
   const [reference, setReference] = useState<File | null>(null);
   const [upload, setUpload] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
+  const [limits, setLimits] = useState<{ video_enabled: boolean; max_video_seconds: number; max_video_mb: number } | null>(null);
+  const [video, setVideo] = useState<{ file: File; durationMs: number; thumbnail: Blob; thumbUrl: string } | null>(null);
+  const [progress, setProgress] = useState<number | null>(null);
+  useEffect(() => { getMediaLimits().then(setLimits).catch(() => setLimits(null)); }, []);
+  useEffect(() => () => { if (video) URL.revokeObjectURL(video.thumbUrl); }, [video]);
+
+  async function chooseVideo(file: File | null) {
+    setVideo(null); onError(null);
+    if (!file || !limits) return;
+    if (!["video/mp4", "video/quicktime"].includes(file.type)) { onError("Use an MP4 or MOV video."); return; }
+    if (file.size > limits.max_video_mb * 1024 * 1024) { onError(`Videos must be ${limits.max_video_mb} MB or smaller.`); return; }
+    try {
+      const info = await inspectVideo(file);
+      if (info.durationMs > limits.max_video_seconds * 1000 + 500) {
+        onError(`Videos can be at most ${limits.max_video_seconds} seconds; this one is ${formatDuration(info.durationMs)}.`);
+        return;
+      }
+      setVideo({ file, ...info, thumbUrl: URL.createObjectURL(info.thumbnail) });
+    } catch (err) {
+      onError(err instanceof Error ? err.message : "Could not read the video");
+    }
+  }
+
+  async function doVideoUpload() {
+    if (!video) return;
+    setBusy(true); setProgress(0); onError(null);
+    try {
+      const detail = await uploadVideoCreative(clientId, { name: name.trim() || video.file.name, adType, facts, video: video.file, thumbnail: video.thumbnail }, setProgress);
+      await applyCopy(detail);
+      setVideo(null);
+      onCreated(detail.asset.id);
+    } catch (err) { onError(errorText(err, "Could not upload the video")); } finally { setBusy(false); setProgress(null); }
+  }
 
   async function applyCopy(detail: CreativeDetail) {
     if (!chosen.headline && !chosen.primary_text) return;
@@ -263,6 +346,22 @@ function ArtworkMaker({ clientId, adType, facts, prompt, onPrompt, chosen, onErr
           <input type="file" accept="image/png,image/jpeg,image/webp" onChange={(e) => setReference(e.target.files?.[0] ?? null)} /></label>
         <label className="form-field"><span>Or upload finished artwork</span>
           <input type="file" accept="image/png,image/jpeg,image/webp" onChange={(e) => setUpload(e.target.files?.[0] ?? null)} /></label>
+      </div>
+      <div className="video-upload">
+        <label className="form-field"><span>Or upload a video ad <small>{limits?.video_enabled
+          ? `MP4 or MOV · up to ${limits.max_video_seconds} s · ${limits.max_video_mb} MB`
+          : "not available: the server has no media storage configured"}</small></span>
+          <input type="file" accept="video/mp4,video/quicktime" disabled={!limits?.video_enabled || busy}
+            onChange={(e) => void chooseVideo(e.target.files?.[0] ?? null)} /></label>
+        {video && (
+          <div className="video-chosen">
+            <img src={video.thumbUrl} alt="Video thumbnail" />
+            <div><strong>{video.file.name}</strong><small>{formatDuration(video.durationMs)} · {(video.file.size / 1024 / 1024).toFixed(1)} MB · thumbnail captured from the video</small>
+              {progress !== null && <div className="upload-progress" role="progressbar" aria-valuenow={Math.round(progress * 100)} aria-valuemin={0} aria-valuemax={100}>
+                <span style={{ width: `${Math.round(progress * 100)}%` }} /></div>}</div>
+            <button type="button" className="primary-button" disabled={busy} onClick={() => void doVideoUpload()}>{busy ? `Uploading ${Math.round((progress ?? 0) * 100)}%` : "Upload video"}</button>
+          </div>
+        )}
       </div>
       <p className="targeting-note">Generated artwork is illustrative. Factual claims belong in the copy, where they are checked and approved.</p>
       <div className="row-actions">
@@ -320,7 +419,9 @@ function CreativeDrawer({ id, chosen, onClose, onChanged }: { id: string; chosen
             <div className="ad-preview" aria-label="Ad preview">
               <div className="ad-preview-head"><span className="ad-avatar" /> <span><strong>Your Page</strong><small>Sponsored</small></span></div>
               <p className="ad-preview-text">{draft.primary_text || "Primary text appears here."}</p>
-              <AuthImage imageId={current.image_id} alt={`Artwork for ${detail.asset.name}`} className="ad-preview-image" />
+              {current.video_id
+                ? <AuthVideo videoId={current.video_id} posterId={current.image_id} className="ad-preview-image" label={detail.asset.name} />
+                : <AuthImage imageId={current.image_id} alt={`Artwork for ${detail.asset.name}`} className="ad-preview-image" />}
               <div className="ad-preview-foot"><span><small>{draft.description || " "}</small><strong>{draft.headline || "Headline"}</strong></span>
                 <span className="ad-preview-cta">{ctaLabel(draft.cta)}</span></div>
             </div>

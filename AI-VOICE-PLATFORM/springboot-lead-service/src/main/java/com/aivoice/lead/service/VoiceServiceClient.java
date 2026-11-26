@@ -31,6 +31,7 @@ public class VoiceServiceClient {
 
     private final RestClient client;
     private final RestClient campaignClient;
+    private final RestClient mediaClient;
 
     public VoiceServiceClient(AppProperties props, RestClient.Builder builder) {
         Duration timeout = Duration.ofSeconds(props.voiceService().requestTimeoutSeconds());
@@ -58,6 +59,46 @@ public class VoiceServiceClient {
                 .defaultHeader("X-Service-Key", props.internalServiceKey() == null ? "" : props.internalServiceKey())
                 .requestFactory(campaignFactory)
                 .build();
+
+        // Video uploads to Meta can take minutes for a large file.
+        JdkClientHttpRequestFactory mediaFactory = new JdkClientHttpRequestFactory(
+                HttpClient.newBuilder()
+                        .version(HttpClient.Version.HTTP_1_1)
+                        .connectTimeout(Duration.ofSeconds(5))
+                        .build());
+        mediaFactory.setReadTimeout(Duration.ofMinutes(12));
+        this.mediaClient = builder.clone()
+                .baseUrl(props.voiceService().baseUrl())
+                .defaultHeader("X-Service-Key", props.internalServiceKey() == null ? "" : props.internalServiceKey())
+                .requestFactory(mediaFactory)
+                .build();
+    }
+
+    /** Streams a stored video to FastAPI, which uploads it to the ad account's video library. */
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> metaVideoUpload(java.nio.file.Path file, String mime, String name, String adAccountId,
+                                               String metaAccessToken) {
+        org.springframework.util.LinkedMultiValueMap<String, Object> form = new org.springframework.util.LinkedMultiValueMap<>();
+        form.add("ad_account_id", adAccountId);
+        form.add("name", name);
+        org.springframework.http.HttpHeaders partHeaders = new org.springframework.http.HttpHeaders();
+        partHeaders.setContentType(org.springframework.http.MediaType.parseMediaType(mime));
+        form.add("file", new org.springframework.http.HttpEntity<>(new org.springframework.core.io.FileSystemResource(file), partHeaders));
+        try {
+            Map<String, Object> response = mediaClient.post().uri("/api/meta/ads-builder/video")
+                    .header("X-Meta-Access-Token", metaAccessToken)
+                    .contentType(org.springframework.http.MediaType.MULTIPART_FORM_DATA)
+                    .body(form)
+                    .retrieve().body(Map.class);
+            if (response == null) {
+                throw new MetaGraphException(502, -1, "mcp_empty_response", "Video upload returned no data");
+            }
+            return response;
+        } catch (HttpStatusCodeException e) {
+            throw new MetaGraphException(e.getStatusCode().value(), -1, "mcp_http_response", errorDetail(e));
+        } catch (ResourceAccessException e) {
+            throw new MetaGraphException(502, -1, "mcp_transport_failure", "Video upload to Meta did not complete");
+        }
     }
 
     /**

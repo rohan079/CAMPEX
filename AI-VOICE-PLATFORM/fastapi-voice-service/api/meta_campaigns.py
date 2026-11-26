@@ -9,6 +9,7 @@ from schemas import (
     MetaCampaignPublishRequest,
     MetaCampaignStatusesRequest,
     MetaCampaignStatusRequest,
+    MetaLocationSearchRequest,
     MetaObjectApplyRequest,
     MetaObjectStateRequest,
 )
@@ -76,24 +77,42 @@ async def publish_paused_campaign(
     from fastmcp import Client
 
     try:
+        arguments = {
+            "ad_account_id": body.ad_account_id,
+            "name": body.campaign_name,
+            "objective": body.objective,
+            "location": body.location,
+            "age_min": body.age_min,
+            "age_max": body.age_max,
+            "platforms": body.platforms,
+            "daily_budget_minor": body.daily_budget_minor or 50_000,
+            "confirmed": body.confirmed,
+            "access_token": access_token,
+        }
+        if body.geo_key and body.geo_type:
+            # An exact place picked from Meta's location search; skips matching the text again.
+            arguments["geo_key"] = body.geo_key
+            arguments["geo_type"] = body.geo_type
         async with Client(request.app.state.meta_ads_mcp) as client:
-            result = await client.call_tool("create_paused_campaign", {
-                "ad_account_id": body.ad_account_id,
-                "name": body.campaign_name,
-                "objective": body.objective,
-                "location": body.location,
-                "age_min": body.age_min,
-                "age_max": body.age_max,
-                "platforms": body.platforms,
-                "daily_budget_minor": body.daily_budget_minor or 50_000,
-                "confirmed": body.confirmed,
-                "access_token": access_token,
-            })
+            result = await client.call_tool("create_paused_campaign", arguments)
     except ToolError as exc:
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(exc)) from exc
     except FastMCPError as exc:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Meta MCP service is unavailable") from exc
     return _tool_data(result)
+
+
+@router.post("/locations")
+async def search_locations(
+    body: MetaLocationSearchRequest,
+    request: Request,
+    access_token: str | None = Header(default=None, alias="X-Meta-Access-Token"),
+) -> dict:
+    """Read-only Meta location search, so a campaign targets an exact place Meta knows."""
+    if not access_token:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Connect Meta Business first")
+    result = await _call(request, "search_ad_locations", {"query": body.query, "access_token": access_token})
+    return {"locations": _tool_rows(result)}
 
 
 @router.post("/campaigns/lookup")

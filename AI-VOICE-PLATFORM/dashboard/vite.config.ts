@@ -13,6 +13,8 @@ const FIREBASE_KEYS = [
   "FIREBASE_MESSAGING_SENDER_ID",
   "FIREBASE_APP_ID",
   "FIREBASE_MEASUREMENT_ID",
+  // Public URL of the Spring lead service for large uploads (videos), which cannot pass through the Vercel proxy.
+  "CAMPEX_UPLOAD_URL",
 ] as const;
 
 export default defineConfig(({ mode }) => {

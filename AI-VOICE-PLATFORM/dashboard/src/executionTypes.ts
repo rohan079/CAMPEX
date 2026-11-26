@@ -4,7 +4,19 @@ export type ExecutionStatus = "DRAFT" | "READY_FOR_REVIEW" | "PENDING_APPROVAL" 
   | "PUBLISHED_PAUSED" | "ACTIVE" | "FAILED" | "CANCELLED";
 
 export type ExecutionAction = "edit" | "validate" | "submit" | "approve" | "reject" | "publish" | "retry"
-  | "reconcile" | "cancel";
+  | "reconcile" | "cancel" | "revise" | "ad_retry" | "ad_check";
+
+/** A place from Meta's location search. */
+export interface MetaLocation {
+  key: string;
+  type: "city" | "region" | "country";
+  name: string;
+  region?: string | null;
+  country_name?: string | null;
+  label: string;
+}
+
+export type AdStatus = "not_requested" | "pending" | "uploading" | "processing" | "creating" | "created" | "failed" | "skipped";
 
 export interface CampaignConfig {
   ad_account_id: string;
@@ -12,6 +24,9 @@ export interface CampaignConfig {
   objective: "leads" | "traffic" | "sales" | "awareness";
   platforms: string[];
   location: string;
+  /** Meta's key for the picked place; publish targets it exactly. Absent when the location was typed. */
+  location_key?: string | null;
+  location_type?: "city" | "region" | "country" | null;
   age_min: number;
   age_max: number;
   daily_budget_minor: number;
@@ -80,6 +95,11 @@ export interface ExecutionDetail {
   approvals: ApprovalRecord[];
   steps: ExecutionStep[];
   allowed_actions: ExecutionAction[];
+  ad_status: AdStatus;
+  ad_error: string | null;
+  meta_ad_id: string | null;
+  meta_video_id: string | null;
+  meta_creative_id: string | null;
 }
 
 export interface AppNotification {

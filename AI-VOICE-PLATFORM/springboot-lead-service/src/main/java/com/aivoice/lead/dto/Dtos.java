@@ -200,7 +200,9 @@ public final class Dtos {
             @Size(max = 64) String adAccountId,
             @Size(max = 64) String pageId,
             @jakarta.validation.constraints.Min(100) Integer dailyBudgetMinor,
-            @jakarta.validation.constraints.AssertTrue boolean confirmed) {
+            @jakarta.validation.constraints.AssertTrue boolean confirmed,
+            @Size(max = 64) @Pattern(regexp = "[A-Za-z0-9_-]+") String geoKey,
+            @Pattern(regexp = "city|region|country") String geoType) {
     }
 
     public record MetaCampaignPublishResponse(

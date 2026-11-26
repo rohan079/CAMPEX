@@ -11,6 +11,7 @@ from api import (
     creative,
     edesy_webhook,
     media_edesy,
+    meta_ads,
     meta_campaigns,
     meta_dashboard,
     performance,
@@ -21,6 +22,7 @@ from config import get_settings
 from services.conversation_service import ConversationService
 from services.campaign_assistant import CampaignAssistantService
 from services.lead_client import LeadServiceClient
+from services.meta_ad_builder import MetaAdBuilder
 from services.meta_ads_mcp import create_meta_ads_mcp
 from services.skill_registry import SkillRegistry
 from services.telephony_service import TelephonyService
@@ -38,6 +40,7 @@ async def lifespan(app: FastAPI):
         settings, TelephonyService(settings), LeadServiceClient(settings)
     )
     app.state.meta_ads_mcp = meta_ads_mcp
+    app.state.meta_ad_builder = MetaAdBuilder(settings)
     app.state.skill_registry = SkillRegistry()
     app.state.campaign_assistant = CampaignAssistantService(
         settings,
@@ -58,6 +61,7 @@ app.include_router(creative.router)
 app.include_router(performance.router)
 app.include_router(meta_campaigns.router)
 app.include_router(meta_dashboard.router)
+app.include_router(meta_ads.router)
 app.include_router(voice_webhook.router)
 app.include_router(edesy_webhook.router)
 app.include_router(tts_preview.router)

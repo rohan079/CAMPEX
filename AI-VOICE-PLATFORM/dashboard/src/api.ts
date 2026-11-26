@@ -81,6 +81,33 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+/**
+ * Multipart upload with progress. Large files go straight to the lead service (CAMPEX_UPLOAD_URL) because the Vercel
+ * proxy rejects request bodies over ~4.5 MB; the Firebase ID token authorizes the request as usual.
+ */
+export async function uploadForm<T>(path: string, form: FormData, onProgress?: (fraction: number) => void): Promise<T> {
+  const headers = await authHeaders();
+  const base = (import.meta.env.CAMPEX_UPLOAD_URL || "").replace(/\/$/, "");
+  return new Promise<T>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `${base}${path}`);
+    headers.forEach((value, key) => { if (key.toLowerCase() !== "content-type") xhr.setRequestHeader(key, value); });
+    xhr.upload.onprogress = (e) => { if (e.lengthComputable && onProgress) onProgress(e.loaded / e.total); };
+    xhr.onerror = () => reject(new Error("Upload failed: Campex could not be reached."));
+    xhr.onload = () => {
+      let detail: string | undefined;
+      try {
+        const body = JSON.parse(xhr.responseText) as { detail?: unknown; message?: unknown };
+        detail = typeof body.detail === "string" ? body.detail : typeof body.message === "string" ? body.message : undefined;
+        if (xhr.status >= 200 && xhr.status < 300) { resolve(body as T); return; }
+      } catch { /* non-JSON */ }
+      if (xhr.status === 413) { reject(new ApiError("The file is too large to upload here.", 413)); return; }
+      reject(new ApiError(publicErrorMessage(xhr.status, detail), xhr.status));
+    };
+    xhr.send(form);
+  });
+}
+
 /** Authenticated binary GET (e.g. stored creative images, which need the Firebase token). */
 export async function requestBlob(path: string): Promise<Blob> {
   const headers = await authHeaders();

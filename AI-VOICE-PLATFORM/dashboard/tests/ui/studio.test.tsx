@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as exec from "../../src/executionApi";
+import * as measurement from "../../src/measurementApi";
 import { CampaignStudio, studioIssues, withUtm } from "../../src/CampaignStudio";
 import type { ExecutionDetail } from "../../src/executionTypes";
 
@@ -13,8 +14,10 @@ vi.mock("../../src/api", () => ({
 vi.mock("../../src/creativeApi", () => ({ listCreatives: vi.fn(async () => []), getCreative: vi.fn(), creativeImage: vi.fn() }));
 vi.mock("../../src/intelligenceApi", () => ({ getBudgetPolicy: vi.fn(async () => ({ daily_spend_limit: 3000, target_cost_per_qualified_lead: 2000 })) }));
 vi.mock("../../src/executionApi", () => ({ listExecutions: vi.fn(async () => []), createExecution: vi.fn(), getExecution: vi.fn(),
-  updateExecution: vi.fn(), validateExecution: vi.fn(), submitExecution: vi.fn() }));
+  updateExecution: vi.fn(), validateExecution: vi.fn(), submitExecution: vi.fn(), searchMetaLocations: vi.fn(async () => ({ locations: [] })) }));
+vi.mock("../../src/measurementApi", () => ({ getAdAccounts: vi.fn(), setAdAccounts: vi.fn() }));
 const m = vi.mocked(exec);
+const ma = vi.mocked(measurement);
 
 const client = { id: "c1", name: "Green Fields" } as Parameters<typeof CampaignStudio>[0]["client"];
 
@@ -22,11 +25,14 @@ function detail(status: ExecutionDetail["execution"]["status"]): ExecutionDetail
   return { execution: { id: "e1", status, config_version: 1 } as ExecutionDetail["execution"] } as ExecutionDetail;
 }
 
-const base = { name: "Villas", objective: "leads" as const, adAccountId: "act_555", pageId: "p1", location: "Guntur", ageMin: 25, ageMax: 55,
+const base = { name: "Villas", objective: "leads" as const, adAccountId: "act_555", pageId: "p1", location: "Guntur", locationKey: "1035921", locationType: "city" as const, ageMin: 25, ageMax: 55,
   placements: ["facebook" as const], language: "en" as const, dailyBudget: "1000", headline: "Villas near Guntur", body: "Book a visit.",
   description: "", cta: "LEARN_MORE", url: "", utm: true, creativeId: "cr1", creativeVersion: 1, creativeImageId: null };
 
-beforeEach(() => { m.listExecutions.mockResolvedValue([]); });
+beforeEach(() => {
+  m.listExecutions.mockResolvedValue([]);
+  ma.getAdAccounts.mockResolvedValue({ ad_account_ids: ["act_555"] });
+});
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
 
 describe("studio rules", () => {
@@ -37,6 +43,7 @@ describe("studio rules", () => {
     const traffic = studioIssues({ ...base, objective: "traffic" }, null, null);
     expect(traffic.some((i) => i.text.includes("destination URL"))).toBe(true);
     expect(studioIssues({ ...base, url: "http://x.com" }, null, null).some((i) => i.text.includes("https"))).toBe(true);
+    expect(studioIssues({ ...base, locationKey: null }, null, null).some((i) => i.step === "audience" && i.level === "warning")).toBe(true);
     expect(studioIssues({ ...base, creativeId: null }, null, null).some((i) => i.level === "warning" && i.text.includes("creative review"))).toBe(true);
   });
 
@@ -48,6 +55,17 @@ describe("studio rules", () => {
 });
 
 describe("Campaign studio", () => {
+  it("links an unlinked ad account to the client from the Goal step", async () => {
+    ma.getAdAccounts.mockResolvedValue({ ad_account_ids: ["act_111"] });
+    ma.setAdAccounts.mockResolvedValue({ ad_account_ids: ["act_111", "act_555"] });
+    render(<CampaignStudio client={client} onOpenChannels={() => undefined} onOpenApprovals={() => undefined} />);
+    const link = await screen.findByRole("button", { name: "Link to Green Fields" });
+    fireEvent.click(link);
+    await waitFor(() => expect(ma.setAdAccounts).toHaveBeenCalledWith("c1", ["act_111", "act_555"]));
+    expect(await screen.findByText(/Green Fields Ads is now linked to Green Fields/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Link to Green Fields" })).toBeNull();
+  });
+
   it("walks the steps, forecasts budget against policy and saves a server draft", async () => {
     m.createExecution.mockResolvedValue(detail("DRAFT"));
     render(<CampaignStudio client={client} onOpenChannels={() => {}} />);

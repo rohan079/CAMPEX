@@ -4,10 +4,12 @@ import { ApiError, assistCampaign, getMetaConnection } from "./api";
 import type { MetaConnectionStatus } from "./api";
 import { getCreative, listCreatives } from "./creativeApi";
 import type { CreativeSummary } from "./creativeTypes";
-import { AuthImage } from "./CreativeStudioPage";
+import { AuthImage, AuthVideo, formatDuration } from "./CreativeStudioPage";
 import { createExecution, getExecution, listExecutions, submitExecution, updateExecution, validateExecution } from "./executionApi";
 import type { CampaignConfig, ExecutionDetail, ExecutionSummary } from "./executionTypes";
 import { getBudgetPolicy } from "./intelligenceApi";
+import { LocationPicker } from "./LocationPicker";
+import { getAdAccounts, setAdAccounts } from "./measurementApi";
 import type { BudgetPolicy } from "./intelligenceTypes";
 import type { CampaignPlatform, Client, LanguageCode } from "./types";
 
@@ -28,6 +30,8 @@ interface StudioForm {
   adAccountId: string;
   pageId: string;
   location: string;
+  locationKey: string | null;
+  locationType: "city" | "region" | "country" | null;
   ageMin: number;
   ageMax: number;
   placements: Placement[];
@@ -42,6 +46,7 @@ interface StudioForm {
   creativeId: string | null;
   creativeVersion: number | null;
   creativeImageId: string | null;
+  creativeVideoId: string | null;
 }
 
 type Issue = { step: StepId; level: "error" | "warning"; text: string };
@@ -83,9 +88,9 @@ const STEPS: { id: StepId; label: string; hint: string }[] = [
 
 function blankForm(): StudioForm {
   return {
-    name: "", objective: "leads", adAccountId: "", pageId: "", location: "", ageMin: 25, ageMax: 55,
+    name: "", objective: "leads", adAccountId: "", pageId: "", location: "", locationKey: null, locationType: null, ageMin: 25, ageMax: 55,
     placements: ["facebook", "instagram"], language: "en", dailyBudget: "1000", headline: "", body: "", description: "",
-    cta: "LEARN_MORE", url: "", utm: true, creativeId: null, creativeVersion: null, creativeImageId: null,
+    cta: "LEARN_MORE", url: "", utm: true, creativeId: null, creativeVersion: null, creativeImageId: null, creativeVideoId: null,
   };
 }
 
@@ -113,9 +118,10 @@ export function studioIssues(f: StudioForm, policy: BudgetPolicy | null, mappedA
   const w = (step: StepId, text: string) => out.push({ step, level: "warning", text });
   if (!f.name.trim()) e("goal", "Name the campaign.");
   if (!f.adAccountId) e("goal", "Choose the Meta ad account.");
-  if (mappedAccount === false) e("goal", "This ad account is not mapped to the client (Tracking → Ad accounts).");
+  if (mappedAccount === false) e("goal", "This ad account isn't linked to the client yet. Link it on the Goal step.");
   if (!f.pageId) w("goal", "No Facebook Page selected; Meta needs one for the ad.");
   if (!f.location.trim()) e("audience", "Add a target location.");
+  else if (!f.locationKey) w("audience", "Pick the location from Meta's suggestions, or Meta may reject the publish.");
   if (f.ageMax < f.ageMin) e("audience", "Maximum age is below minimum age.");
   if (f.placements.length === 0) e("audience", "Choose at least one placement.");
   const budget = Number(f.dailyBudget);
@@ -153,6 +159,8 @@ export function CampaignStudio({ client, onOpenChannels, onOpenApprovals }: {
   const [saveKey, setSaveKey] = useState(() => crypto.randomUUID());
   const [busy, setBusy] = useState<"save" | "send" | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [mapped, setMapped] = useState<string[] | null>(null);
+  const [linking, setLinking] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [serverErrors, setServerErrors] = useState<string[]>([]);
   const [image, setImage] = useState<File | null>(null);
@@ -187,8 +195,9 @@ export function CampaignStudio({ client, onOpenChannels, onOpenApprovals }: {
     try { setDrafts(await listExecutions(client.id)); } catch { setDrafts([]); }
   }, [client]);
   useEffect(() => {
-    setPolicy(null); setCreatives([]); setDraftId(null); setDraftStatus(null);
+    setPolicy(null); setCreatives([]); setDraftId(null); setDraftStatus(null); setMapped(null);
     if (!client) return;
+    getAdAccounts(client.id).then((r) => setMapped(r.ad_account_ids)).catch(() => setMapped(null));
     getBudgetPolicy(client.id).then(setPolicy).catch(() => setPolicy(null));
     listCreatives(client.id, "APPROVED").then(setCreatives).catch(() => setCreatives([]));
     void loadDrafts();
@@ -202,7 +211,9 @@ export function CampaignStudio({ client, onOpenChannels, onOpenApprovals }: {
   }, [image]);
 
   const metaReady = Boolean(meta?.connected && !meta.expired && (meta.ad_accounts?.length ?? 0) > 0);
-  const issues = useMemo(() => studioIssues(form, policy, null), [form, policy]);
+  const accountKey = form.adAccountId && !form.adAccountId.startsWith("act_") ? `act_${form.adAccountId}` : form.adAccountId;
+  const mappedAccount = mapped && accountKey ? mapped.includes(accountKey) : null;
+  const issues = useMemo(() => studioIssues(form, policy, mappedAccount), [form, policy, mappedAccount]);
   const errorsFor = (s: StepId) => issues.filter((i) => i.step === s && i.level === "error");
   const stepDone = (s: StepId) => s === "review" ? false : errorsFor(s).length === 0;
   const blocking = issues.filter((i) => i.level === "error");
@@ -210,6 +221,23 @@ export function CampaignStudio({ client, onOpenChannels, onOpenApprovals }: {
   const budget = Number(form.dailyBudget) || 0;
   const account = meta?.ad_accounts.find((a) => a.id === form.adAccountId);
   const page = meta?.pages.find((p) => p.id === form.pageId);
+
+  async function linkAccount() {
+    if (!client || !mapped || !accountKey) return;
+    setLinking(true);
+    setError(null);
+    try {
+      const r = await setAdAccounts(client.id, [...mapped, accountKey]);
+      setMapped(r.ad_account_ids);
+      setNotice(`${account?.name ?? accountKey} is now linked to ${client.name}.`);
+    } catch (err) {
+      setError(err instanceof ApiError && err.status === 403
+        ? "Only an owner or manager of this client can link ad accounts. Ask one of them, or use Tracking → Ad accounts."
+        : err instanceof Error ? err.message : "Could not link the ad account");
+    } finally {
+      setLinking(false);
+    }
+  }
 
   function suggestName() {
     const month = new Intl.DateTimeFormat("en-IN", { month: "short", year: "2-digit" }).format(new Date());
@@ -219,7 +247,7 @@ export function CampaignStudio({ client, onOpenChannels, onOpenApprovals }: {
 
   async function attachCreative(id: string) {
     if (!id) {
-      setForm((f) => ({ ...f, creativeId: null, creativeVersion: null, creativeImageId: null }));
+      setForm((f) => ({ ...f, creativeId: null, creativeVersion: null, creativeImageId: null, creativeVideoId: null }));
       setDirty(true);
       return;
     }
@@ -227,7 +255,7 @@ export function CampaignStudio({ client, onOpenChannels, onOpenApprovals }: {
       const d = await getCreative(id);
       const v = d.versions.find((x) => x.version === d.asset.approved_version);
       if (!v) return;
-      setForm((f) => ({ ...f, creativeId: id, creativeVersion: v.version, creativeImageId: v.image_id,
+      setForm((f) => ({ ...f, creativeId: id, creativeVersion: v.version, creativeImageId: v.image_id, creativeVideoId: v.video_id,
         headline: v.headline ?? "", body: v.primary_text ?? "", description: v.description ?? "", cta: v.cta ?? f.cta }));
       setDirty(true);
       setSaveKey(crypto.randomUUID());
@@ -239,7 +267,8 @@ export function CampaignStudio({ client, onOpenChannels, onOpenApprovals }: {
   function toConfig(): CampaignConfig {
     return {
       ad_account_id: form.adAccountId, name: form.name.trim(), objective: form.objective, platforms: form.placements,
-      location: form.location.trim(), age_min: form.ageMin, age_max: form.ageMax,
+      location: form.location.trim(), location_key: form.locationKey, location_type: form.locationKey ? form.locationType : null,
+      age_min: form.ageMin, age_max: form.ageMax,
       daily_budget_minor: Math.round(budget * 100), headline: form.headline.trim(), primary_text: form.body.trim(),
       description: form.description.trim() || null, cta: form.cta, destination_url: finalUrl || null, page_id: form.pageId || null,
       creative_asset_id: form.creativeId, creative_version: form.creativeVersion,
@@ -304,15 +333,16 @@ export function CampaignStudio({ client, onOpenChannels, onOpenApprovals }: {
       const url = c.destination_url ?? "";
       setForm({
         name: c.name, objective: c.objective, adAccountId: c.ad_account_id, pageId: c.page_id ?? "", location: c.location,
+        locationKey: c.location_key ?? null, locationType: c.location_type ?? null,
         ageMin: c.age_min, ageMax: c.age_max, placements: c.platforms.filter((p): p is Placement => ["facebook", "instagram", "whatsapp_ads"].includes(p)),
         language: form.language, dailyBudget: String(Math.round(c.daily_budget_minor / 100)), headline: c.headline, body: c.primary_text,
         description: c.description ?? "", cta: c.cta, url, utm: false, creativeId: c.creative_asset_id ?? null,
-        creativeVersion: c.creative_version ?? null, creativeImageId: null,
+        creativeVersion: c.creative_version ?? null, creativeImageId: null, creativeVideoId: null,
       });
       if (c.creative_asset_id) {
         getCreative(c.creative_asset_id).then((cr) => {
           const v = cr.versions.find((x) => x.version === c.creative_version);
-          setForm((f) => ({ ...f, creativeImageId: v?.image_id ?? null }));
+          setForm((f) => ({ ...f, creativeImageId: v?.image_id ?? null, creativeVideoId: v?.video_id ?? null }));
         }).catch(() => undefined);
       }
       setDraftId(id); setDraftStatus(d.execution.status); setDirty(false); setStep("goal");
@@ -400,7 +430,15 @@ export function CampaignStudio({ client, onOpenChannels, onOpenApprovals }: {
                   <select value={form.adAccountId} onChange={(e) => set("adAccountId", e.target.value)} disabled={!metaReady}>
                     {!metaReady && <option value="">Connect Meta first</option>}
                     {(meta?.ad_accounts ?? []).map((a) => <option key={a.id} value={a.id}>{a.name}{a.currency ? ` · ${a.currency}` : ""}</option>)}
-                  </select></label>
+                  </select>
+                  {mappedAccount === false && client && (
+                    <span className="field-fix" role="alert">
+                      Not linked to {client.name}. Campex only publishes to ad accounts linked to the client.{" "}
+                      <button type="button" className="text-button" onClick={() => void linkAccount()} disabled={linking}>
+                        {linking ? "Linking…" : `Link to ${client.name}`}
+                      </button>
+                    </span>
+                  )}</label>
                 <label className="form-field"><span>Facebook Page <small>the ad runs as this Page</small></span>
                   <select value={form.pageId} onChange={(e) => set("pageId", e.target.value)} disabled={!metaReady}>
                     {(meta?.pages ?? []).length === 0 && <option value="">No Pages connected</option>}
@@ -417,8 +455,8 @@ export function CampaignStudio({ client, onOpenChannels, onOpenApprovals }: {
 
           {step === "audience" && (
             <Step title="Who should see it?" sub={`${form.location.trim() || "Location not set"} · ages ${form.ageMin}–${form.ageMax} · ${form.placements.length} placement${form.placements.length === 1 ? "" : "s"}`}>
-              <label className="form-field"><span>Location <small>city, region or country as Meta knows it; Meta confirms it at publish</small></span>
-                <input value={form.location} maxLength={160} onChange={(e) => set("location", e.target.value)} placeholder="Guntur" /></label>
+              <LocationPicker clientId={client?.id} value={{ location: form.location, key: form.locationKey, type: form.locationType }}
+                onChange={(next) => { set("location", next.location); setForm((f) => ({ ...f, locationKey: next.key, locationType: next.type })); }} />
               <div className="form-field"><span>Age range</span>
                 <div className="age-row">
                   <input aria-label="Minimum age" type="number" min={AGE_MIN} max={AGE_MAX} value={form.ageMin} onChange={(e) => set("ageMin", clampAge(Number(e.target.value), AGE_MIN))} />
@@ -472,7 +510,7 @@ export function CampaignStudio({ client, onOpenChannels, onOpenApprovals }: {
               <label className="form-field"><span>Approved creative <small>from Creative Studio · locks the copy to the approved version</small></span>
                 <select value={form.creativeId ?? ""} onChange={(e) => void attachCreative(e.target.value)}>
                   <option value="">None, write copy here</option>
-                  {creatives.map((c) => <option key={c.id} value={c.id}>{c.name} · v{c.approved_version}</option>)}
+                  {creatives.map((c) => <option key={c.id} value={c.id}>{c.name} · v{c.approved_version}{c.media_type === "video" ? ` · video ${formatDuration(c.video_duration_ms)}` : ""}</option>)}
                 </select></label>
               {!form.creativeId && (
                 <label className="form-field"><span>Image for preview <small>preview only; save artwork in Creative Studio to use it in a campaign</small></span>
@@ -496,6 +534,10 @@ export function CampaignStudio({ client, onOpenChannels, onOpenApprovals }: {
               <label className="check-line"><input type="checkbox" checked={form.utm} onChange={(e) => set("utm", e.target.checked)} />Add UTM tags so CRM attribution recognises this campaign</label>
               {finalUrl && form.utm && <p className="utm-preview"><span>Final URL</span><code>{finalUrl}</code></p>}
               {form.creativeId && <p className="targeting-note">Copy is locked to the approved creative. Change it in Creative Studio and approve a new version.</p>}
+              {form.creativeId && (form.url.trim() && form.pageId
+                ? <p className="notice note-info">After an approver publishes the campaign, Campex uploads the {form.creativeVideoId ? "video and its thumbnail" : "image"} to Meta
+                    {form.creativeVideoId ? ", waits until Meta has processed the video," : ""} and creates the ad, paused.</p>
+                : <p className="notice warn-notice">Add a destination URL and a Facebook Page so Campex can create the ad itself; otherwise add it in Ads Manager.</p>)}
             </Step>
           )}
 
@@ -540,7 +582,8 @@ export function CampaignStudio({ client, onOpenChannels, onOpenApprovals }: {
             <AdMock kind={preview} pageName={page?.name ?? client?.name ?? "Your Page"} headline={form.headline} body={form.body}
               description={form.description} cta={CTAS.find((c) => c.id === form.cta)?.label ?? "Learn more"}
               domain={(() => { try { return finalUrl ? new URL(finalUrl).hostname : ""; } catch { return ""; } })()}
-              image={form.creativeImageId ? <AuthImage imageId={form.creativeImageId} alt="Approved creative" className="mock-image" />
+              image={form.creativeVideoId ? <AuthVideo videoId={form.creativeVideoId} posterId={form.creativeImageId} className="mock-image" label="Approved video" />
+                : form.creativeImageId ? <AuthImage imageId={form.creativeImageId} alt="Approved creative" className="mock-image" />
                 : imageUrl ? <img className="mock-image" src={imageUrl} alt="Preview" /> : <div className="mock-image mock-empty">Image</div>} />
             <p className="preview-disclaimer">Approximate layout. Meta crops and truncates per placement.</p>
           </section>

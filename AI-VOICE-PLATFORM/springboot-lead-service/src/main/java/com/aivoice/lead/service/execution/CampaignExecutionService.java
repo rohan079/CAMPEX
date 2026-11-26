@@ -4,6 +4,7 @@ import com.aivoice.lead.dto.CampaignExecutionDtos.ApprovalDto;
 import com.aivoice.lead.dto.CampaignExecutionDtos.CampaignConfig;
 import com.aivoice.lead.dto.CampaignExecutionDtos.ExecutionDetail;
 import com.aivoice.lead.dto.CampaignExecutionDtos.ExecutionSummary;
+import com.aivoice.lead.dto.CampaignExecutionDtos.MetaLocation;
 import com.aivoice.lead.dto.CampaignExecutionDtos.StepDto;
 import com.aivoice.lead.dto.CampaignExecutionDtos.ValidationReport;
 import com.aivoice.lead.dto.CampaignExecutionDtos.VersionDto;
@@ -78,12 +79,15 @@ public class CampaignExecutionService {
     private final MetaExecutionGateway meta;
     private final ObjectMapper json;
     private final com.aivoice.lead.service.creative.CreativeStudioService creatives;
+    private final AdCreationService ads;
 
     public CampaignExecutionService(JdbcTemplate jdbc, TransactionTemplate tx, ClientAccessService access,
                                     AuditService audit, NotificationService notifications,
                                     MetaAccessResolver metaAccess, MetaExecutionGateway meta, ObjectMapper json,
-                                    com.aivoice.lead.service.creative.CreativeStudioService creatives) {
+                                    com.aivoice.lead.service.creative.CreativeStudioService creatives,
+                                    AdCreationService ads) {
         this.creatives = creatives;
+        this.ads = ads;
         this.jdbc = jdbc;
         this.tx = tx;
         this.access = access;
@@ -256,6 +260,49 @@ public class CampaignExecutionService {
         return detail(id);
     }
 
+    /**
+     * A publish Meta rejected outright (nothing was created) goes back to DRAFT so the config can be fixed. Earlier
+     * approvals are invalidated: the revised campaign is reviewed and approved again before it can publish.
+     */
+    public ExecutionDetail revise(UUID id) {
+        UUID clientId = clientOf(id);
+        Actor actor = access.require(clientId, Permission.MANAGE);
+        tx.executeWithoutResult(s -> {
+            Row row = lock(id);
+            requireStatus(row, Set.of("FAILED"), "revised");
+            if (row.metaCampaignId != null || !"rejected".equals(row.publishOutcome)) {
+                throw new ConflictException("Only a publish Meta rejected, with nothing created, can be revised. "
+                        + "Reconcile or retry this one instead.");
+            }
+            jdbc.update("UPDATE campaign_approvals SET invalidated_at = ? WHERE execution_id = ? AND invalidated_at IS NULL",
+                    now(), id);
+            jdbc.update("UPDATE campaign_executions SET last_error = NULL, publish_outcome = NULL WHERE id = ?", id);
+            transition(id, row.status, "DRAFT", actor, "revise", null);
+        });
+        return detail(id);
+    }
+
+    /** Read-only Meta location search for the Studio location picker. */
+    public List<MetaLocation> searchLocations(UUID clientId, String query) {
+        Actor actor = access.require(clientId, Permission.MANAGE);
+        String q = trim(query);
+        if (q.length() < 2) {
+            return List.of();
+        }
+        if (q.length() > 100) {
+            throw new IllegalArgumentException("Location search must be at most 100 characters");
+        }
+        MetaAccess resolved = metaAccess.resolve(clientId, actor.email());
+        if (!resolved.available()) {
+            throw new ConflictException(resolved.note());
+        }
+        try {
+            return meta.searchLocations(resolved.token(), q);
+        } catch (GatewayException e) {
+            throw new ConflictException("Meta location search is unavailable right now; try again shortly.");
+        }
+    }
+
     // ------------------------------------------------------------------------------------------------ publishing
 
     public ExecutionDetail publish(UUID id, boolean confirm) {
@@ -337,7 +384,8 @@ public class CampaignExecutionService {
         CampaignConfig c = row.config;
         PublishCommand command = new PublishCommand(c.adAccountId(), c.name() + " [" + row.publishTag + "]",
                 c.objective(), c.platforms(), c.location(), c.ageMin(), c.ageMax(), c.dailyBudgetMinor(),
-                c.headline(), c.primaryText(), c.cta(), blankToNull(c.pageId()));
+                c.headline(), c.primaryText(), c.cta(), blankToNull(c.pageId()), blankToNull(c.locationKey()),
+                blankToNull(c.locationKey()) == null ? null : c.locationType());
         return new Prepared(id, clientId, metaToken.token(), command, c.name());
     }
 
@@ -412,11 +460,13 @@ public class CampaignExecutionService {
         Row row = lock(id);
         boolean complete = adsetId != null;
         Timestamp now = now();
+        String adStatus = complete ? ads.initialStatus(row.config) : "not_requested";
         jdbc.update("UPDATE campaign_executions SET status = ?, publish_outcome = ?, meta_campaign_id = ?, "
-                        + "meta_adset_id = ?, meta_ad_id = ?, last_error = ?, published_at = ?, updated_at = ? WHERE id = ?",
+                        + "meta_adset_id = ?, meta_ad_id = ?, last_error = ?, published_at = ?, updated_at = ?, ad_status = ?, ad_error = ?, "
+                        + "ad_next_check_at = NULL WHERE id = ?",
                 complete ? "PUBLISHED_PAUSED" : "FAILED", complete ? "created" : "partial", campaignId, adsetId, adId,
                 complete ? null : "Meta created the campaign (paused) but not the ad set. Finish or delete it in Ads Manager.",
-                now, now, id);
+                now, now, adStatus, "skipped".equals(adStatus) ? AdCreationService.skipReason(row.config) : null, id);
         Map<String, Object> ids = new LinkedHashMap<>();
         ids.put("campaign_id", campaignId);
         ids.put("adset_id", adsetId);
@@ -525,6 +575,7 @@ public class CampaignExecutionService {
         String publishTag;
         String metaCampaignId;
         String createdBy;
+        String publishOutcome;
         CampaignConfig config;
     }
 
@@ -548,6 +599,7 @@ public class CampaignExecutionService {
         r.publishTag = rs.getString("publish_tag");
         r.metaCampaignId = rs.getString("meta_campaign_id");
         r.createdBy = rs.getString("created_by");
+        r.publishOutcome = rs.getString("publish_outcome");
         r.config = read(rs.getString("config"), CampaignConfig.class);
         return r;
     }
@@ -585,8 +637,27 @@ public class CampaignExecutionService {
             return new ExecutionDetail(summary, read(rs.getString("config"), CampaignConfig.class), hash,
                     validation == null ? null : read(validation, ValidationReport.class), rs.getString("publish_tag"),
                     rs.getInt("publish_attempts"), rs.getString("meta_adset_id"), instant(rs, "meta_checked_at"),
-                    versions, approvals, steps, allowedActions(status, rs.getString("meta_campaign_id") != null));
+                    versions, approvals, steps, adActions(withRevise(allowedActions(status, rs.getString("meta_campaign_id") != null), status,
+                            rs.getString("meta_campaign_id") != null, rs.getString("publish_outcome")), rs.getString("ad_status")),
+                    rs.getString("ad_status"), rs.getString("ad_error"), rs.getString("meta_ad_id"), rs.getString("meta_video_id"),
+                    rs.getString("meta_creative_id"));
         }, id).stream().findFirst().orElseThrow(() -> new NotFoundException("Campaign execution not found"));
+    }
+
+    static List<String> withRevise(List<String> actions, String status, boolean hasMetaCampaign, String outcome) {
+        if (!"FAILED".equals(status) || hasMetaCampaign || !"rejected".equals(outcome)) {
+            return actions;
+        }
+        List<String> out = new ArrayList<>(actions);
+        out.add("revise");
+        return out;
+    }
+
+    static List<String> adActions(List<String> actions, String adStatus) {
+        List<String> out = new ArrayList<>(actions);
+        if ("failed".equals(adStatus)) out.add("ad_retry");
+        if (AdCreationService.ACTIVE.contains(adStatus)) out.add("ad_check");
+        return out;
     }
 
     static List<String> allowedActions(String status, boolean hasMetaCampaign) {
@@ -614,7 +685,9 @@ public class CampaignExecutionService {
                 trim(c.location()), c.ageMin(), c.ageMax(), c.dailyBudgetMinor(), trim(c.headline()),
                 trim(c.primaryText()), trim(c.description()),
                 c.cta() == null ? null : c.cta().trim().toUpperCase(Locale.ROOT).replace(' ', '_'),
-                trim(c.destinationUrl()), trim(c.pageId()), trim(c.creativeAssetId()), c.creativeVersion());
+                trim(c.destinationUrl()), trim(c.pageId()), trim(c.creativeAssetId()), c.creativeVersion(),
+                blankToNull(trim(c.locationKey())), c.locationType() == null || c.locationType().isBlank() ? null
+                        : c.locationType().trim().toLowerCase(Locale.ROOT));
     }
 
     String hash(CampaignConfig config) {

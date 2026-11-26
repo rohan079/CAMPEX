@@ -68,7 +68,8 @@ public final class CreativeDtos {
 
     public record VersionDto(int version, String imageId, String imageSource, String imagePrompt, String headline,
                              String primaryText, String description, String cta, List<String> facts,
-                             ClaimCheck claimCheck, String changeNote, String createdBy, Instant createdAt) {
+                             ClaimCheck claimCheck, String changeNote, String createdBy, Instant createdAt,
+                             String videoId, Integer videoDurationMs) {
     }
 
     public record ApprovalDto(String id, int version, String decision, boolean claimsAcknowledged, String decidedBy,
@@ -77,7 +78,11 @@ public final class CreativeDtos {
 
     public record AssetSummary(String id, String clientId, String name, String adType, String status,
                                int currentVersion, Integer approvedVersion, String imageId, String headline,
-                               String createdBy, Instant updatedAt) {
+                               String createdBy, Instant updatedAt, String mediaType, String videoId,
+                               Integer videoDurationMs) {
+    }
+
+    public record MediaLimits(boolean videoEnabled, int maxVideoSeconds, int maxVideoMb) {
     }
 
     public record AssetDetail(AssetSummary asset, List<VersionDto> versions, List<ApprovalDto> approvals,
