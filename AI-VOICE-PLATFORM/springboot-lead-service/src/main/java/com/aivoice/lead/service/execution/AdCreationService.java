@@ -121,6 +121,17 @@ public class AdCreationService {
         if (leased != 1) return;
         Map<String, Object> row = jdbc.queryForMap("SELECT * FROM campaign_executions WHERE id = ?", id);
         UUID clientId = (UUID) row.get("client_id");
+        try {
+            advanceLeased(id, clientId, row);
+        } catch (RuntimeException e) {
+            // Never leave an ad silently stuck: anything unexpected becomes a visible, retryable failure.
+            log.warn("Ad creation for execution {} hit an unexpected error: {}", id, e.getClass().getSimpleName());
+            fail(id, clientId, "Campex hit an unexpected error while creating the ad (" + e.getClass().getSimpleName()
+                    + "). Nothing was duplicated; use Retry ad creation.");
+        }
+    }
+
+    private void advanceLeased(UUID id, UUID clientId, Map<String, Object> row) {
         CampaignConfig config = read(String.valueOf(row.get("config")));
         MetaAccess token = metaAccess.resolve(clientId, null);
         if (!token.available()) {

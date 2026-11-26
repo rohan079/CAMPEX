@@ -142,19 +142,42 @@ ARTWORK_RULES = (" Advertising photograph or illustration only. Do not render an
                  "logos, watermarks or badges in the image. Do not depict approvals, certificates or price tags.")
 
 
+ASPECTS = ("1:1", "4:5", "9:16")
+
+
+def image_size(model: str, default: str, aspect: str | None) -> str:
+    """The provider size closest to the wanted aspect; Campex then crops/fits it to the exact ratio."""
+    if not aspect or aspect == "1:1":
+        return default
+    if model.startswith("gpt-image"):
+        return "1024x1536"
+    if model == "dall-e-3":
+        return "1024x1792"
+    return default
+
+
+def _composition(aspect: str | None) -> str:
+    if aspect == "9:16":
+        return " Vertical 9:16 full-screen composition for Stories and Reels: keep the subject centred, with calm space at the top and bottom."
+    if aspect == "4:5":
+        return " Vertical 4:5 feed composition with the subject centred."
+    return ""
+
+
 class ImageGenerationError(RuntimeError):
     """Image generation failed; the message is safe to show to users."""
 
 
 async def generate_ad_image(settings: Settings, prompt: str, reference: tuple[bytes, str] | None = None,
-                            transport: httpx.AsyncBaseTransport | None = None) -> dict[str, str]:
+                            transport: httpx.AsyncBaseTransport | None = None, aspect: str | None = None) -> dict[str, str]:
     """Returns {"mime_type", "data_base64", "prompt", "model"}. Never returns a temporary provider URL."""
     if not settings.ai_image_enabled:
         raise ImageGenerationError("Image generation is disabled on the server.")
     if not settings.campaign_ai_api_key:
         raise ImageGenerationError("Image generation is not configured (missing API key).")
     model = (settings.ai_image_model or "dall-e-3").strip()
-    full_prompt = prompt.strip()[:3000] + ARTWORK_RULES
+    full_prompt = prompt.strip()[:3000] + _composition(aspect) + ARTWORK_RULES
+    size = image_size(model, settings.ai_image_size, aspect)
     headers = {"Authorization": f"Bearer {settings.campaign_ai_api_key}"}
     base = settings.ai_base_url.rstrip("/")
     try:
@@ -165,11 +188,11 @@ async def generate_ad_image(settings: Settings, prompt: str, reference: tuple[by
                 data, mime = reference
                 response = await client.post(
                     f"{base}/images/edits", headers=headers,
-                    data={"model": model, "prompt": full_prompt, "size": settings.ai_image_size, "n": "1"},
+                    data={"model": model, "prompt": full_prompt, "size": size, "n": "1"},
                     files={"image": ("reference." + (mime.split("/")[-1] or "png"), data, mime)},
                 )
             else:
-                payload: dict[str, Any] = {"model": model, "prompt": full_prompt, "size": settings.ai_image_size, "n": 1}
+                payload: dict[str, Any] = {"model": model, "prompt": full_prompt, "size": size, "n": 1}
                 if model.startswith("dall-e"):
                     payload["response_format"] = "b64_json"
                 response = await client.post(f"{base}/images/generations", headers=headers, json=payload)

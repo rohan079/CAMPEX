@@ -27,9 +27,12 @@ public class CreativeAiGateway {
         return voice.creativeCall("/api/creative/check", Map.of("texts", texts, "facts", facts));
     }
 
-    public GeneratedImage image(String prompt, String referenceBase64, String referenceMime) {
+    public GeneratedImage image(String prompt, String referenceBase64, String referenceMime, String aspect) {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("prompt", prompt);
+        if (aspect != null) {
+            body.put("aspect", aspect);
+        }
         if (referenceBase64 != null) {
             body.put("reference_base64", referenceBase64);
             body.put("reference_mime", referenceMime);

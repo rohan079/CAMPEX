@@ -6,7 +6,8 @@ import { BudgetPanel } from "./BudgetPanel";
 import { ChartCard, COLORS } from "./charts";
 import { CreativePanel } from "./CreativePanel";
 import { ExperimentPanel } from "./ExperimentPanel";
-import { askPerformance, completeDays, getOverview, getTrends, refreshPerformance } from "./intelligenceApi";
+import { askPerformance, completeDays, getCampaignOptions, getOverview, getTrends, refreshPerformance } from "./intelligenceApi";
+import type { CampaignOption } from "./intelligenceApi";
 import type { AskResult, DataNote, Overview, PerfRow, Trends } from "./intelligenceTypes";
 import { ClientRequired, ErrorBanner, KpiCard, errorText } from "./measurementUi";
 import { RecommendationsPanel } from "./RecommendationsPanel";
@@ -67,9 +68,22 @@ export function PerformanceOverview({ clientId, from, to }: { clientId: string; 
   const [overview, setOverview] = useState<Overview | null>(null);
   const [trends, setTrends] = useState<Trends | null>(null);
   const [campaignId, setCampaignId] = useState("");
+  const [options, setOptions] = useState<CampaignOption[] | null>(null);
+  const [optionsNote, setOptionsNote] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  // The filter lists every campaign in the client's Meta ad accounts, not only those with data in this date range,
+  // so a new or paused campaign can still be picked and stays selected when it has no rows.
+  useEffect(() => {
+    let active = true;
+    setCampaignId("");
+    getCampaignOptions(clientId)
+      .then((r) => { if (active) { setOptions(r.campaigns); setOptionsNote(r.note); } })
+      .catch(() => { if (active) { setOptions(null); setOptionsNote(null); } });
+    return () => { active = false; };
+  }, [clientId]);
 
   useEffect(() => {
     let active = true;
@@ -103,12 +117,18 @@ export function PerformanceOverview({ clientId, from, to }: { clientId: string; 
         <label className="form-field"><span>Campaign</span>
           <select aria-label="Campaign filter" value={campaignId} onChange={(e) => setCampaignId(e.target.value)}>
             <option value="">All campaigns</option>
-            {overview?.current.rows.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+            {campaignChoices(options, overview?.current.rows ?? [], campaignId).map((o) => (
+              <option key={o.id} value={o.id}>{campaignLabel(o)}</option>))}
           </select></label>
         <div className="filter-actions"><button type="button" className="secondary-button" disabled={busy} onClick={() => void refresh()}>{busy ? "Refreshing…" : "Refresh Meta data"}</button></div>
       </div>
       <ErrorBanner error={error} onDismiss={() => setError(null)} />
+      {optionsNote && <p className="helper-text">{optionsNote}</p>}
       {note && <p className="notice success-notice" role="status">{note}</p>}
+      {campaignId && overview && overview.current.rows.length === 0 && (
+        <p className="notice warn-notice" role="status">Meta has no delivery data for this campaign between {formatDay(from)} and {formatDay(to)}.
+          Paused or new campaigns show numbers once they spend; use Refresh Meta data after that.</p>
+      )}
       {overview && t && (
         <>
           <p className="helper-text">{formatDay(from)} – {formatDay(to)} · Meta conversions counted with {overview.current.attribution_windows}; CRM outcomes by first touch.</p>
@@ -152,6 +172,22 @@ export function PerformanceOverview({ clientId, from, to }: { clientId: string; 
       <AskPanel clientId={clientId} from={from} to={to} />
     </>
   );
+}
+
+type Choice = { id: string; name: string | null; status?: string | null };
+
+/** Live campaign list first; campaigns seen only in the report are added; the selection is always kept. */
+export function campaignChoices(options: CampaignOption[] | null, rows: PerfRow[], selected: string): Choice[] {
+  const byId = new Map<string, Choice>();
+  (options ?? []).forEach((o) => byId.set(o.id, o));
+  rows.forEach((r) => { if (!byId.has(r.id)) byId.set(r.id, { id: r.id, name: r.name }); });
+  if (selected && !byId.has(selected)) byId.set(selected, { id: selected, name: null });
+  return [...byId.values()];
+}
+
+function campaignLabel(o: Choice) {
+  const status = o.status ? ` · ${o.status.replace(/_/g, " ").toLowerCase()}` : "";
+  return `${o.name || "Unnamed campaign"} · ${o.id}${status}`;
 }
 
 export function CampaignTable({ rows, currency }: { rows: PerfRow[]; currency: string }) {

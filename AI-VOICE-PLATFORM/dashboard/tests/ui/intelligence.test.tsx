@@ -11,7 +11,7 @@ import { RecommendationsPanel } from "../../src/RecommendationsPanel";
 
 vi.mock("../../src/intelligenceApi", async () => ({
   completeDays: (await vi.importActual<typeof import("../../src/measurementFormat")>("../../src/measurementFormat")).completeDays,
-  getOverview: vi.fn(), getPerformance: vi.fn(), getTrends: vi.fn(), refreshPerformance: vi.fn(), askPerformance: vi.fn(),
+  getOverview: vi.fn(), getCampaignOptions: vi.fn(async () => ({ campaigns: [], note: null })), getPerformance: vi.fn(), getTrends: vi.fn(), refreshPerformance: vi.fn(), askPerformance: vi.fn(),
   listRecommendations: vi.fn(), generateRecommendations: vi.fn(), updateRecommendation: vi.fn(), getBudgetAnalysis: vi.fn(),
   saveBudgetPolicy: vi.fn(), getCreativePerformance: vi.fn(), analyzeCreative: vi.fn(), getAudience: vi.fn(), getPlacements: vi.fn(),
   listAnomalies: vi.fn(), detectAnomalies: vi.fn(), updateAnomaly: vi.fn(), explainAnomaly: vi.fn(), listExperiments: vi.fn(),
@@ -69,6 +69,20 @@ describe("Performance overview", () => {
     expect(within(kpis).getByText("Spend").closest("article")?.textContent).toContain("+25% vs previous period");
     expect(within(kpis).getByText("Qualified leads").closest("article")?.textContent).toContain("CRM-verified");
     expect(within(kpis).getByText("Qualified leads").closest("article")?.textContent).toContain("no comparison");
+  });
+
+  it("lists campaigns without delivery data and keeps the selection", async () => {
+    m.getCampaignOptions.mockResolvedValue({ campaigns: [
+      { id: "120200000001", name: "Paused launch", status: "PAUSED", ad_account_id: "act_1", has_data: false }], note: null });
+    render(<PerformanceOverview clientId="c1" from="2026-10-23" to="2026-11-19" />);
+    const select = await screen.findByLabelText("Campaign filter") as HTMLSelectElement;
+    const option = await screen.findByRole("option", { name: "Paused launch · 120200000001 · paused" });
+    m.getOverview.mockResolvedValue({ ...(await m.getOverview.mock.results[0].value), current: { ...(await m.getOverview.mock.results[0].value).current, rows: [] } });
+    fireEvent.change(select, { target: { value: "120200000001" } });
+    await waitFor(() => expect(m.getOverview).toHaveBeenLastCalledWith("c1", { from: "2026-10-23", to: "2026-11-19" }, "120200000001"));
+    expect(select.value).toBe("120200000001");
+    expect((option as HTMLOptionElement).selected).toBe(true);
+    expect(await screen.findByText(/no delivery data for this campaign/)).toBeTruthy();
   });
 
   it("filters by campaign and warns about ungrounded AI numbers", async () => {

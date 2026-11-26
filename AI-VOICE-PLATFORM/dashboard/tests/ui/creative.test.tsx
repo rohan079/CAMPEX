@@ -7,7 +7,7 @@ import { CreativeStudioPage } from "../../src/CreativeStudioPage";
 vi.mock("../../src/creativeApi", () => ({
   generateCopy: vi.fn(), generateArtwork: vi.fn(), uploadArtwork: vi.fn(), listCreatives: vi.fn(), getCreative: vi.fn(),
   editCreative: vi.fn(), submitCreative: vi.fn(), approveCreative: vi.fn(), rejectCreative: vi.fn(), archiveCreative: vi.fn(),
-  creativeImage: vi.fn(), fileToBase64: vi.fn(), creativeVideo: vi.fn(), uploadVideoCreative: vi.fn(),
+  creativeImage: vi.fn(), fileToBase64: vi.fn(), creativeVideo: vi.fn(), uploadVideoCreative: vi.fn(), reformatCreative: vi.fn(),
   getMediaLimits: vi.fn(async () => ({ video_enabled: true, max_video_seconds: 60, max_video_mb: 200 })),
 }));
 const m = vi.mocked(api);
@@ -84,6 +84,17 @@ describe("Creative studio", () => {
     expect((within(dialog).getByRole("button", { name: "Submit for review" }) as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(within(dialog).getByRole("button", { name: "Save new version" }));
     await waitFor(() => expect(m.editCreative).toHaveBeenCalledWith("cr1", expect.objectContaining({ headline: "New headline" })));
+  });
+
+  it("makes a 9:16 version of existing artwork and generates new artwork at 9:16 by default", async () => {
+    m.getCreative.mockResolvedValue(detail("APPROVED", {}, ["edit", "archive"]));
+    m.reformatCreative.mockResolvedValue(detail("EDITING", { version: 3 }));
+    render(<CreativeStudioPage clientId="c1" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Open Diwali villas" }));
+    const dialog = await screen.findByRole("dialog", { name: "Diwali villas" });
+    fireEvent.click(await within(dialog).findByRole("button", { name: "Make 9:16" }));
+    await waitFor(() => expect(m.reformatCreative).toHaveBeenCalledWith("cr1", "9:16"));
+    expect(await within(dialog).findByText(/Made a 9:16 version \(1080×1920\)/)).toBeTruthy();
   });
 
   it("shows video creatives with their length and plays them on demand", async () => {

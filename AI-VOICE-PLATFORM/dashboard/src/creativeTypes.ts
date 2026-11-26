@@ -92,3 +92,11 @@ export interface CreativeEdit {
   image_mime?: string;
   change_note?: string;
 }
+
+/** Meta ad image shapes: 9:16 Stories/Reels (1080x1920), 4:5 feed (1080x1350), 1:1 square (1080x1080). */
+export type AdAspect = "9:16" | "4:5" | "1:1";
+export const AD_ASPECTS: { id: AdAspect; label: string; hint: string }[] = [
+  { id: "9:16", label: "9:16", hint: "Stories & Reels · 1080×1920" },
+  { id: "4:5", label: "4:5", hint: "Feed · 1080×1350" },
+  { id: "1:1", label: "1:1", hint: "Square · 1080×1080" },
+];
