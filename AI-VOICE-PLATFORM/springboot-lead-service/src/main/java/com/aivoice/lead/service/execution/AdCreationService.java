@@ -1,6 +1,7 @@
 package com.aivoice.lead.service.execution;
 
 import com.aivoice.lead.dto.CampaignExecutionDtos.CampaignConfig;
+import com.aivoice.lead.dto.CampaignExecutionDtos.CreativeRef;
 import com.aivoice.lead.service.AuditService;
 import com.aivoice.lead.service.ClientAccessService;
 import com.aivoice.lead.service.ClientAccessService.Permission;
@@ -16,6 +17,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -40,6 +42,8 @@ public class AdCreationService {
     static final int MAX_PROCESSING_CHECKS = 60;
     static final Duration PROCESSING_POLL = Duration.ofSeconds(30);
     static final Duration LEASE = Duration.ofMinutes(15);
+    /** Meta advises a handful of ads per ad set; Campex creates at most six. */
+    static final int MAX_ADS = 6;
 
     private final JdbcTemplate jdbc;
     private final TransactionTemplate tx;
@@ -78,141 +82,240 @@ public class AdCreationService {
         return "No destination URL was set; add the ad in Ads Manager.";
     }
 
+    /** Inside the publish transaction: one row per ad (main creative first, then the extra ones). */
+    void schedule(UUID executionId, CampaignConfig c) {
+        Timestamp now = Timestamp.from(Instant.now());
+        List<CreativeRef> refs = new ArrayList<>();
+        refs.add(new CreativeRef(c.creativeAssetId(), c.creativeVersion()));
+        if (c.extraCreatives() != null) refs.addAll(c.extraCreatives());
+        for (int i = 0; i < refs.size() && i < MAX_ADS; i++) {
+            jdbc.update("INSERT INTO campaign_execution_ads (id, execution_id, position, creative_asset_id, creative_version, status, "
+                            + "created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'pending', ?, ?) ON CONFLICT (execution_id, position) DO NOTHING",
+                    UUID.randomUUID(), executionId, i, UUID.fromString(refs.get(i).assetId()), refs.get(i).version(), now, now);
+        }
+    }
+
     @Scheduled(fixedDelayString = "${campex.ads.poll-ms:15000}", initialDelayString = "${campex.ads.initial-delay-ms:20000}")
     public void tick() {
-        List<UUID> due = jdbc.queryForList("SELECT id FROM campaign_executions WHERE ad_status IN ('pending', 'uploading', 'processing', 'creating') "
-                + "AND (ad_next_check_at IS NULL OR ad_next_check_at <= now()) ORDER BY updated_at LIMIT 10", UUID.class);
-        for (UUID id : due) {
+        List<UUID> due = jdbc.queryForList("SELECT id FROM campaign_execution_ads WHERE status IN ('pending', 'uploading', 'processing', 'creating') "
+                + "AND (next_check_at IS NULL OR next_check_at <= now()) ORDER BY updated_at LIMIT 10", UUID.class);
+        for (UUID adId : due) {
             try {
-                advance(id);
+                advanceAd(adId);
             } catch (RuntimeException e) {
-                log.warn("Ad creation for execution {} failed: {}", id, e.getClass().getSimpleName());
+                log.warn("Ad creation step {} failed: {}", adId, e.getClass().getSimpleName());
             }
         }
     }
 
-    /** "Check now" from the dashboard. */
+    /** "Check now" from the dashboard: advances every unfinished ad of the campaign. */
     public void advanceNow(UUID executionId) {
-        UUID clientId = jdbc.queryForList("SELECT client_id FROM campaign_executions WHERE id = ?", UUID.class, executionId)
-                .stream().findFirst().orElseThrow(() -> new NotFoundException("Campaign execution not found"));
+        UUID clientId = clientOf(executionId);
         access.require(clientId, Permission.MANAGE);
-        jdbc.update("UPDATE campaign_executions SET ad_next_check_at = NULL WHERE id = ? AND ad_status IN ('pending', 'uploading', 'processing', 'creating')", executionId);
-        advance(executionId);
+        jdbc.update("UPDATE campaign_execution_ads SET next_check_at = NULL WHERE execution_id = ? AND status IN ('pending', 'uploading', 'processing', 'creating')", executionId);
+        advanceAll(executionId);
     }
 
-    /** Restarts a failed ad creation; IDs already obtained from Meta are reused. */
+    /** Kept for callers that think in executions (tests, older code paths). */
+    public void advance(UUID executionId) {
+        advanceAll(executionId);
+    }
+
+    /** Restarts failed ads; IDs already obtained from Meta are reused, created ads are left alone. */
     public void retry(UUID executionId) {
-        UUID clientId = jdbc.queryForList("SELECT client_id FROM campaign_executions WHERE id = ?", UUID.class, executionId)
-                .stream().findFirst().orElseThrow(() -> new NotFoundException("Campaign execution not found"));
+        UUID clientId = clientOf(executionId);
         String actor = access.require(clientId, Permission.MANAGE).email();
-        int n = jdbc.update("UPDATE campaign_executions SET ad_status = 'pending', ad_error = NULL, ad_attempts = 0, ad_next_check_at = NULL "
-                + "WHERE id = ? AND ad_status = 'failed' AND meta_adset_id IS NOT NULL", executionId);
-        if (n != 1) throw new ConflictException("Only a failed ad creation can be retried");
-        tx.executeWithoutResult(s -> audit.record(clientId, actor, "campaign_execution", executionId, "ad_retry", Map.of()));
-        advance(executionId);
+        Integer adset = jdbc.queryForObject("SELECT count(*) FROM campaign_executions WHERE id = ? AND meta_adset_id IS NOT NULL", Integer.class, executionId);
+        int n = adset == null || adset == 0 ? 0 : jdbc.update("UPDATE campaign_execution_ads SET status = 'pending', error = NULL, attempts = 0, "
+                + "next_check_at = NULL, updated_at = ? WHERE execution_id = ? AND status = 'failed'", Timestamp.from(Instant.now()), executionId);
+        if (n == 0) throw new ConflictException("Only a failed ad creation can be retried");
+        tx.executeWithoutResult(s -> {
+            audit.record(clientId, actor, "campaign_execution", executionId, "ad_retry", Map.of("ads", n));
+            summarize(executionId, clientId);
+        });
+        advanceAll(executionId);
     }
 
-    /** Runs as many steps as possible now; stops when Meta needs time (video processing) or on an error. */
-    public void advance(UUID id) {
-        // Lease: only one worker advances an execution at a time.
-        int leased = jdbc.update("UPDATE campaign_executions SET ad_next_check_at = ? WHERE id = ? AND ad_status IN "
-                + "('pending', 'uploading', 'processing', 'creating') AND (ad_next_check_at IS NULL OR ad_next_check_at <= now())",
-                Timestamp.from(Instant.now().plus(LEASE)), id);
+    private void advanceAll(UUID executionId) {
+        for (UUID adId : jdbc.queryForList("SELECT id FROM campaign_execution_ads WHERE execution_id = ? AND status IN "
+                + "('pending', 'uploading', 'processing', 'creating') ORDER BY position", UUID.class, executionId)) {
+            advanceAd(adId);
+        }
+    }
+
+    /** Runs as many steps of one ad as possible now; stops when Meta needs time (video processing) or on an error. */
+    void advanceAd(UUID adId) {
+        // Lease: only one worker advances an ad at a time.
+        int leased = jdbc.update("UPDATE campaign_execution_ads SET next_check_at = ? WHERE id = ? AND status IN "
+                + "('pending', 'uploading', 'processing', 'creating') AND (next_check_at IS NULL OR next_check_at <= now())",
+                Timestamp.from(Instant.now().plus(LEASE)), adId);
         if (leased != 1) return;
-        Map<String, Object> row = jdbc.queryForMap("SELECT * FROM campaign_executions WHERE id = ?", id);
+        Map<String, Object> ad = jdbc.queryForMap("SELECT * FROM campaign_execution_ads WHERE id = ?", adId);
+        UUID executionId = (UUID) ad.get("execution_id");
+        Map<String, Object> row = jdbc.queryForMap("SELECT * FROM campaign_executions WHERE id = ?", executionId);
         UUID clientId = (UUID) row.get("client_id");
         try {
-            advanceLeased(id, clientId, row);
+            advanceLeased(ad, row, clientId);
         } catch (RuntimeException e) {
             // Never leave an ad silently stuck: anything unexpected becomes a visible, retryable failure.
-            log.warn("Ad creation for execution {} hit an unexpected error: {}", id, e.getClass().getSimpleName());
-            fail(id, clientId, "Campex hit an unexpected error while creating the ad (" + e.getClass().getSimpleName()
+            log.warn("Ad creation for {} hit an unexpected error: {}", adId, e.getClass().getSimpleName());
+            fail(ad, clientId, "Campex hit an unexpected error while creating the ad (" + e.getClass().getSimpleName()
                     + "). Nothing was duplicated; use Retry ad creation.");
         }
     }
 
-    private void advanceLeased(UUID id, UUID clientId, Map<String, Object> row) {
+    private void advanceLeased(Map<String, Object> ad, Map<String, Object> row, UUID clientId) {
+        UUID adId = (UUID) ad.get("id");
+        UUID executionId = (UUID) row.get("id");
+        int position = (Integer) ad.get("position");
         CampaignConfig config = read(String.valueOf(row.get("config")));
         MetaAccess token = metaAccess.resolve(clientId, null);
         if (!token.available()) {
-            fail(id, clientId, "Meta connection unavailable: " + token.note());
+            fail(ad, clientId, "Meta connection unavailable: " + token.note());
             return;
         }
-        Creative creative = creative(UUID.fromString(config.creativeAssetId()), config.creativeVersion());
-        String tag = String.valueOf(row.get("publish_tag"));
+        Creative creative = creative((UUID) ad.get("creative_asset_id"), (Integer) ad.get("creative_version"));
+        String label = label(String.valueOf(row.get("publish_tag")), position);
         String account = config.adAccountId();
-        String status = String.valueOf(row.get("ad_status"));
-        String videoId = (String) row.get("meta_video_id");
-        String imageHash = (String) row.get("meta_image_hash");
-        String creativeId = (String) row.get("meta_creative_id");
+        String status = String.valueOf(ad.get("status"));
+        String videoId = (String) ad.get("meta_video_id");
+        String imageHash = (String) ad.get("meta_image_hash");
+        String creativeId = (String) ad.get("meta_creative_id");
+        String adName = adName(config.name(), label);
+        String who = position == 0 ? "" : "Ad " + (position + 1) + ": ";
         try {
             if ("pending".equals(status) || "uploading".equals(status)) {
-                setStatus(id, "uploading", null);
+                setStatus(adId, executionId, clientId, "uploading");
                 if (imageHash == null) {
-                    imageHash = meta.uploadImage(token.token(), account, config.name() + " [" + tag + "] image", creative.imageBytes());
-                    jdbc.update("UPDATE campaign_executions SET meta_image_hash = ? WHERE id = ?", imageHash, id);
-                    step(id, "ad_media", "ok", "Image uploaded to the ad account", Map.of("image_hash", imageHash));
+                    imageHash = meta.uploadImage(token.token(), account, adName + " image", creative.imageBytes());
+                    jdbc.update("UPDATE campaign_execution_ads SET meta_image_hash = ? WHERE id = ?", imageHash, adId);
+                    step(executionId, "ad_media", "ok", who + "Image uploaded to the ad account", Map.of("image_hash", imageHash));
                 }
                 if (creative.videoPath() != null && videoId == null) {
-                    videoId = meta.uploadVideo(token.token(), account, config.name() + " [" + tag + "]", creative.videoPath(), creative.videoMime());
-                    jdbc.update("UPDATE campaign_executions SET meta_video_id = ? WHERE id = ?", videoId, id);
-                    step(id, "ad_media", "ok", "Video uploaded; Meta is processing it", Map.of("video_id", videoId));
+                    videoId = meta.uploadVideo(token.token(), account, adName, creative.videoPath(), creative.videoMime());
+                    jdbc.update("UPDATE campaign_execution_ads SET meta_video_id = ? WHERE id = ?", videoId, adId);
+                    step(executionId, "ad_media", "ok", who + "Video uploaded; Meta is processing it", Map.of("video_id", videoId));
                 }
                 status = creative.videoPath() != null ? "processing" : "creating";
-                setStatus(id, status, null);
+                setStatus(adId, executionId, clientId, status);
             }
             if ("processing".equals(status)) {
                 String state = meta.videoStatus(token.token(), videoId);
                 if ("error".equals(state)) {
-                    fail(id, clientId, "Meta could not process the video. Re-export it as H.264 MP4 and upload it again.");
+                    fail(ad, clientId, "Meta could not process the video. Re-export it as H.264 MP4 and upload it again.");
                     return;
                 }
                 if (!"ready".equals(state)) {
-                    int checks = jdbc.queryForObject("UPDATE campaign_executions SET ad_attempts = ad_attempts + 1 WHERE id = ? RETURNING ad_attempts",
-                            Integer.class, id);
+                    int checks = jdbc.queryForObject("UPDATE campaign_execution_ads SET attempts = attempts + 1 WHERE id = ? RETURNING attempts",
+                            Integer.class, adId);
                     if (checks > MAX_PROCESSING_CHECKS) {
-                        fail(id, clientId, "Meta is still processing the video after 30 minutes; retry later.");
+                        fail(ad, clientId, "Meta is still processing the video after 30 minutes; retry later.");
                     } else {
-                        jdbc.update("UPDATE campaign_executions SET ad_next_check_at = ? WHERE id = ?", Timestamp.from(Instant.now().plus(PROCESSING_POLL)), id);
+                        jdbc.update("UPDATE campaign_execution_ads SET next_check_at = ? WHERE id = ?", Timestamp.from(Instant.now().plus(PROCESSING_POLL)), adId);
                     }
                     return;
                 }
                 status = "creating";
-                setStatus(id, status, null);
+                setStatus(adId, executionId, clientId, status);
             }
             if ("creating".equals(status)) {
-                String adName = config.name() + " [" + tag + "]";
                 if (creativeId == null) {
+                    Copy copy = position == 0
+                            ? new Copy(config.headline(), config.primaryText(), config.description(), config.cta())
+                            : copy((UUID) ad.get("creative_asset_id"), (Integer) ad.get("creative_version"), config.cta());
                     creativeId = meta.createCreative(token.token(), new CreativeSpec(account, config.pageId(), creative.videoPath() != null ? "video" : "image",
-                            adName, config.destinationUrl(), config.primaryText(), config.headline(), config.description(), config.cta(), imageHash, videoId));
+                            adName, config.destinationUrl(), copy.primaryText(), copy.headline(), copy.description(), copy.cta(), imageHash, videoId));
                     if (creativeId == null || creativeId.isBlank()) {
-                        fail(id, clientId, "Meta did not return an ad creative ID.");
+                        fail(ad, clientId, "Meta did not return an ad creative ID.");
                         return;
                     }
-                    jdbc.update("UPDATE campaign_executions SET meta_creative_id = ? WHERE id = ?", creativeId, id);
-                    step(id, "ad_creative", "ok", "Ad creative created", Map.of("creative_id", creativeId));
+                    jdbc.update("UPDATE campaign_execution_ads SET meta_creative_id = ? WHERE id = ?", creativeId, adId);
+                    step(executionId, "ad_creative", "ok", who + "Ad creative created", Map.of("creative_id", creativeId));
                 }
                 String adsetId = String.valueOf(row.get("meta_adset_id"));
-                List<String> existing = meta.findAds(token.token(), adsetId, tag);
-                String adId = existing.isEmpty() ? meta.createAd(token.token(), account, adsetId, creativeId, adName) : existing.getFirst();
-                if (adId == null || adId.isBlank()) {
-                    fail(id, clientId, "Meta did not return an ad ID.");
+                List<String> existing = meta.findAds(token.token(), adsetId, "[" + label + "]");
+                String metaAdId = existing.isEmpty() ? meta.createAd(token.token(), account, adsetId, creativeId, adName) : existing.getFirst();
+                if (metaAdId == null || metaAdId.isBlank()) {
+                    fail(ad, clientId, "Meta did not return an ad ID.");
                     return;
                 }
                 String finalCreative = creativeId;
                 tx.executeWithoutResult(s -> {
-                    jdbc.update("UPDATE campaign_executions SET ad_status = 'created', meta_ad_id = ?, ad_error = NULL, ad_next_check_at = NULL, "
-                            + "updated_at = ? WHERE id = ?", adId, Timestamp.from(Instant.now()), id);
-                    step(id, "ad_create", "ok", existing.isEmpty() ? "Ad created (paused)" : "Ad already existed in Meta; linked it",
-                            Map.of("ad_id", adId, "creative_id", finalCreative));
-                    audit.record(clientId, "system:ad-builder", "campaign_execution", id, "ad_created", Map.of("ad_id", adId));
-                    notifications.notifyClientManagers(clientId, null, "campaign_ad_created", "info", "Ad created (paused): " + config.name(),
-                            "The " + (creative.videoPath() != null ? "video" : "image") + " ad is in Meta, paused. Review it in Ads Manager before activating.",
-                            "campaign_execution", id);
+                    jdbc.update("UPDATE campaign_execution_ads SET status = 'created', meta_ad_id = ?, error = NULL, next_check_at = NULL, "
+                            + "updated_at = ? WHERE id = ?", metaAdId, Timestamp.from(Instant.now()), adId);
+                    step(executionId, "ad_create", "ok", who + (existing.isEmpty() ? "Ad created (paused)" : "Ad already existed in Meta; linked it"),
+                            Map.of("ad_id", metaAdId, "creative_id", finalCreative));
+                    audit.record(clientId, "system:ad-builder", "campaign_execution", executionId, "ad_created",
+                            Map.of("ad_id", metaAdId, "position", position + 1));
+                    summarize(executionId, clientId);
                 });
             }
         } catch (GatewayException e) {
-            fail(id, clientId, e.getMessage());
+            fail(ad, clientId, e.getMessage());
+        }
+    }
+
+    /** Publish tag for the first ad, tag-2 … tag-6 for the others; the bracketed label is unique per ad. */
+    static String label(String tag, int position) {
+        return position == 0 ? tag : tag + "-" + (position + 1);
+    }
+
+    /** Meta keeps 100 characters of an ad name; the campaign name is shortened so the tag is never cut off. */
+    static String adName(String campaignName, String label) {
+        String suffix = " [" + label + "]";
+        String name = campaignName == null ? "Campex ad" : campaignName.trim();
+        int room = 100 - suffix.length();
+        return (name.length() > room ? name.substring(0, room).trim() : name) + suffix;
+    }
+
+    record Copy(String headline, String primaryText, String description, String cta) {
+    }
+
+    private Copy copy(UUID assetId, Integer version, String fallbackCta) {
+        Map<String, Object> v = jdbc.queryForMap("SELECT headline, primary_text, description, cta FROM creative_versions WHERE asset_id = ? AND version = ?",
+                assetId, version);
+        String cta = (String) v.get("cta");
+        return new Copy((String) v.get("headline"), (String) v.get("primary_text"), (String) v.get("description"),
+                cta == null || cta.isBlank() ? fallbackCta : cta);
+    }
+
+    /**
+     * Rolls the ads up into the campaign's ad_status / ad_error / meta_* columns, and notifies once when every ad has
+     * finished (all created, or some failed).
+     */
+    private void summarize(UUID executionId, UUID clientId) {
+        List<Map<String, Object>> ads = jdbc.queryForList("SELECT * FROM campaign_execution_ads WHERE execution_id = ? ORDER BY position", executionId);
+        if (ads.isEmpty()) return;
+        Map<String, Object> before = jdbc.queryForMap("SELECT ad_status, name FROM campaign_executions WHERE id = ?", executionId);
+        List<String> statuses = ads.stream().map(a -> String.valueOf(a.get("status"))).toList();
+        String summary = null;
+        for (String s : List.of("processing", "uploading", "creating", "pending")) {
+            if (statuses.contains(s)) { summary = s; break; }
+        }
+        if (summary == null) summary = statuses.contains("failed") ? "failed" : "created";
+        List<String> errors = new ArrayList<>();
+        for (Map<String, Object> a : ads) {
+            if ("failed".equals(a.get("status")) && a.get("error") != null) {
+                int pos = (Integer) a.get("position");
+                errors.add(ads.size() == 1 ? String.valueOf(a.get("error")) : "Ad " + (pos + 1) + ": " + a.get("error"));
+            }
+        }
+        long created = statuses.stream().filter("created"::equals).count();
+        Map<String, Object> first = ads.getFirst();
+        jdbc.update("UPDATE campaign_executions SET ad_status = ?, ad_error = ?, meta_ad_id = COALESCE(?, meta_ad_id), meta_video_id = ?, "
+                        + "meta_creative_id = ?, meta_image_hash = ?, updated_at = ? WHERE id = ?",
+                summary, errors.isEmpty() ? null : String.join(" ", errors), first.get("meta_ad_id"), first.get("meta_video_id"),
+                first.get("meta_creative_id"), first.get("meta_image_hash"), Timestamp.from(Instant.now()), executionId);
+        String was = String.valueOf(before.get("ad_status"));
+        String name = String.valueOf(before.get("name"));
+        if ("created".equals(summary) && !"created".equals(was)) {
+            notifications.notifyClientManagers(clientId, null, "campaign_ad_created", "info",
+                    (ads.size() == 1 ? "Ad created (paused): " : created + " ads created (paused): ") + name,
+                    "The ads are in Meta, paused. Review them in Ads Manager before activating.", "campaign_execution", executionId);
+        } else if ("failed".equals(summary) && !"failed".equals(was)) {
+            notifications.notifyClientManagers(clientId, null, "campaign_ad_failed", "warning",
+                    created > 0 ? created + " of " + ads.size() + " ads created: " + name : "Ad not created",
+                    String.join(" ", errors) + " The campaign stays paused; retry from Campaign approvals.", "campaign_execution", executionId);
         }
     }
 
@@ -228,18 +331,28 @@ public class AdCreationService {
         return new Creative(image, media.path((String) m.get("storage_key")), (String) m.get("mime_type"));
     }
 
-    private void setStatus(UUID id, String status, String error) {
-        jdbc.update("UPDATE campaign_executions SET ad_status = ?, ad_error = ?, updated_at = ? WHERE id = ?", status, error, Timestamp.from(Instant.now()), id);
+    private void setStatus(UUID adId, UUID executionId, UUID clientId, String status) {
+        tx.executeWithoutResult(t -> {
+            jdbc.update("UPDATE campaign_execution_ads SET status = ?, error = NULL, updated_at = ? WHERE id = ?", status, Timestamp.from(Instant.now()), adId);
+            summarize(executionId, clientId);
+        });
     }
 
-    private void fail(UUID id, UUID clientId, String error) {
+    private void fail(Map<String, Object> ad, UUID clientId, String error) {
+        UUID adId = (UUID) ad.get("id");
+        UUID executionId = (UUID) ad.get("execution_id");
+        int position = (Integer) ad.get("position");
         tx.executeWithoutResult(s -> {
-            jdbc.update("UPDATE campaign_executions SET ad_status = 'failed', ad_error = ?, ad_next_check_at = NULL, updated_at = ? WHERE id = ?",
-                    error, Timestamp.from(Instant.now()), id);
-            step(id, "ad_create", "failed", error, null);
-            notifications.notifyClientManagers(clientId, null, "campaign_ad_failed", "warning", "Ad not created",
-                    error + " The campaign stays paused; retry from Campaign approvals.", "campaign_execution", id);
+            jdbc.update("UPDATE campaign_execution_ads SET status = 'failed', error = ?, next_check_at = NULL, updated_at = ? WHERE id = ?",
+                    error, Timestamp.from(Instant.now()), adId);
+            step(executionId, "ad_create", "failed", (position == 0 ? "" : "Ad " + (position + 1) + ": ") + error, null);
+            summarize(executionId, clientId);
         });
+    }
+
+    private UUID clientOf(UUID executionId) {
+        return jdbc.queryForList("SELECT client_id FROM campaign_executions WHERE id = ?", UUID.class, executionId)
+                .stream().findFirst().orElseThrow(() -> new NotFoundException("Campaign execution not found"));
     }
 
     private void step(UUID id, String step, String outcome, String detail, Map<String, Object> ids) {

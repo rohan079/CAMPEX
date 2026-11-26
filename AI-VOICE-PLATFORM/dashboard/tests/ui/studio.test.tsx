@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as exec from "../../src/executionApi";
 import * as measurement from "../../src/measurementApi";
+import * as creativeApi from "../../src/creativeApi";
 import { CampaignStudio, studioIssues, withUtm } from "../../src/CampaignStudio";
 import type { ExecutionDetail } from "../../src/executionTypes";
 
@@ -11,13 +12,14 @@ vi.mock("../../src/api", () => ({
     pages: [{ id: "p1", name: "Green Fields Realty" }] })),
   assistCampaign: vi.fn(),
 }));
-vi.mock("../../src/creativeApi", () => ({ listCreatives: vi.fn(async () => []), getCreative: vi.fn(), creativeImage: vi.fn() }));
+vi.mock("../../src/creativeApi", () => ({ listCreatives: vi.fn(async () => []), getCreative: vi.fn(), creativeImage: vi.fn(async () => new Blob(["x"])) }));
 vi.mock("../../src/intelligenceApi", () => ({ getBudgetPolicy: vi.fn(async () => ({ daily_spend_limit: 3000, target_cost_per_qualified_lead: 2000 })) }));
 vi.mock("../../src/executionApi", () => ({ listExecutions: vi.fn(async () => []), createExecution: vi.fn(), getExecution: vi.fn(),
   updateExecution: vi.fn(), validateExecution: vi.fn(), submitExecution: vi.fn(), searchMetaLocations: vi.fn(async () => ({ locations: [] })) }));
 vi.mock("../../src/measurementApi", () => ({ getAdAccounts: vi.fn(), setAdAccounts: vi.fn() }));
 const m = vi.mocked(exec);
 const ma = vi.mocked(measurement);
+const mc = vi.mocked(creativeApi);
 
 const client = { id: "c1", name: "Green Fields" } as Parameters<typeof CampaignStudio>[0]["client"];
 
@@ -27,7 +29,7 @@ function detail(status: ExecutionDetail["execution"]["status"]): ExecutionDetail
 
 const base = { name: "Villas", objective: "leads" as const, adAccountId: "act_555", pageId: "p1", location: "Guntur", locationKey: "1035921", locationType: "city" as const, ageMin: 25, ageMax: 55,
   placements: ["facebook" as const], language: "en" as const, dailyBudget: "1000", headline: "Villas near Guntur", body: "Book a visit.",
-  description: "", cta: "LEARN_MORE", url: "", utm: true, creativeId: "cr1", creativeVersion: 1, creativeImageId: null };
+  description: "", cta: "LEARN_MORE", url: "", utm: true, creativeId: "cr1", creativeVersion: 1, creativeImageId: null, creativeVideoId: null, extraAds: [] };
 
 beforeEach(() => {
   m.listExecutions.mockResolvedValue([]);
@@ -82,6 +84,30 @@ describe("Campaign studio", () => {
       ad_account_id: "act_555", page_id: "p1", daily_budget_minor: 100000 }), expect.any(String)));
     expect(m.submitExecution).not.toHaveBeenCalled();
     expect(await screen.findByText(/Draft saved in Campex/)).toBeTruthy();
+  });
+
+  it("adds more approved creatives as extra ads in the same ad set", async () => {
+    const summary = (id: string, name: string) => ({ id, client_id: "c1", name, ad_type: "villa", status: "APPROVED" as const, current_version: 2,
+      approved_version: 2, image_id: `img-${id}`, headline: `${name} headline`, created_by: "a@x.test", updated_at: "2026-11-20T10:00:00Z",
+      media_type: "image" as const, video_id: null, video_duration_ms: null });
+    mc.listCreatives.mockResolvedValue([summary("cr1", "Main villa"), summary("cr2", "Lawn photo"), summary("cr3", "Pool photo")]);
+    mc.getCreative.mockResolvedValue({ asset: summary("cr1", "Main villa"), approvals: [], allowed_actions: [],
+      versions: [{ version: 2, image_id: "img-cr1", video_id: null, headline: "Villas near Guntur", primary_text: "Book a visit.", description: null, cta: "LEARN_MORE" }] } as never);
+    m.createExecution.mockResolvedValue(detail("DRAFT"));
+    render(<CampaignStudio client={client} onOpenChannels={() => {}} />);
+    fireEvent.change(screen.getByLabelText("Campaign name"), { target: { value: "Villas" } });
+    const steps = screen.getByRole("navigation", { name: "Campaign steps" });
+    fireEvent.click(within(steps).getByRole("button", { name: /^4/ }));
+    fireEvent.change(await screen.findByLabelText(/^Approved creative/), { target: { value: "cr1" } });
+    const add = await screen.findByLabelText("Add another ad");
+    expect(within(add).queryByRole("option", { name: /Main villa/ })).toBeNull();
+    fireEvent.change(add, { target: { value: "cr2" } });
+    expect(await screen.findByText("Ad 2")).toBeTruthy();
+    expect(screen.getByText(/2 of 6/)).toBeTruthy();
+    await waitFor(() => expect((screen.getByRole("button", { name: "Save draft" }) as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(screen.getByRole("button", { name: "Save draft" }));
+    await waitFor(() => expect(m.createExecution).toHaveBeenCalledWith("c1", expect.objectContaining({
+      creative_asset_id: "cr1", extra_creatives: [{ asset_id: "cr2", version: 2 }] }), expect.any(String)));
   });
 
   it("blocks sending until required items are done, then validates and submits", async () => {

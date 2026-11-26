@@ -318,7 +318,18 @@ function AdStatusBox({ detail, busy, onRetry, onCheck }: { detail: ExecutionDeta
     <section className="ad-status-box" aria-label="Ad creation">
       <div><span className="step-label">AD</span> <span className={`pill tone-${tone}`}>{label}</span>
         {detail.meta_ad_id && <small> · ad {detail.meta_ad_id}</small>}</div>
-      {detail.ad_error && <p className={detail.ad_status === "failed" ? "notice error" : "muted"}>{detail.ad_error}</p>}
+      {(detail.ads?.length ?? 0) > 1 ? (
+        <ol className="ad-status-list" aria-label="Ads in this ad set">
+          {detail.ads!.map((a) => {
+            const [l, t] = AD_STATUS[a.status] ?? [a.status, "neutral"];
+            return (
+              <li key={a.position}><span>Ad {a.position}</span> <span className={`pill tone-${t}`}>{l}</span>
+                {a.meta_ad_id && <small> · ad {a.meta_ad_id}</small>}
+                {a.error && <p className="notice error">{a.error}</p>}</li>
+            );
+          })}
+        </ol>
+      ) : detail.ad_error && <p className={detail.ad_status === "failed" ? "notice error" : "muted"}>{detail.ad_error}</p>}
       {detail.ad_status === "processing" && <p className="muted">Meta usually needs a few minutes for a short video. Campex checks every 30 seconds.</p>}
       <div className="row-actions">
         {detail.allowed_actions.includes("ad_check") && <button type="button" className="secondary-button" disabled={busy !== null} onClick={onCheck}>Check now</button>}

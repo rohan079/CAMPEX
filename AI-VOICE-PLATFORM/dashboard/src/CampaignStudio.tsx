@@ -47,6 +47,8 @@ interface StudioForm {
   creativeVersion: number | null;
   creativeImageId: string | null;
   creativeVideoId: string | null;
+  /** More approved creatives, each becoming its own ad in the same ad set. */
+  extraAds: { id: string; version: number }[];
 }
 
 type Issue = { step: StepId; level: "error" | "warning"; text: string };
@@ -90,7 +92,7 @@ function blankForm(): StudioForm {
   return {
     name: "", objective: "leads", adAccountId: "", pageId: "", location: "", locationKey: null, locationType: null, ageMin: 25, ageMax: 55,
     placements: ["facebook", "instagram"], language: "en", dailyBudget: "1000", headline: "", body: "", description: "",
-    cta: "LEARN_MORE", url: "", utm: true, creativeId: null, creativeVersion: null, creativeImageId: null, creativeVideoId: null,
+    cta: "LEARN_MORE", url: "", utm: true, creativeId: null, creativeVersion: null, creativeImageId: null, creativeVideoId: null, extraAds: [],
   };
 }
 
@@ -110,6 +112,49 @@ export function withUtm(url: string, campaignName: string): string {
   } catch {
     return url;
   }
+}
+
+const MAX_EXTRA_ADS = 5;
+
+/** More approved creatives in the same ad set. Meta shares the budget between them and favours the best performer. */
+function ExtraAds({ main, extras, creatives, onChange }: {
+  main: string; extras: { id: string; version: number }[]; creatives: CreativeSummary[];
+  onChange: (next: { id: string; version: number }[]) => void;
+}) {
+  const used = new Set([main, ...extras.map((x) => x.id)]);
+  const available = creatives.filter((c) => !used.has(c.id) && c.approved_version);
+  const byId = new Map(creatives.map((c) => [c.id, c]));
+  return (
+    <section className="extra-ads" aria-label="More ads in this ad set">
+      <h4>More ads in this ad set <small>{extras.length + 1} of {MAX_EXTRA_ADS + 1}</small></h4>
+      <p className="helper-text">Each approved creative becomes its own paused ad with its own copy. They share this audience and budget; Meta delivers more of the one that performs best.</p>
+      {extras.length > 0 && (
+        <ol className="extra-ad-list">
+          {extras.map((x, i) => {
+            const c = byId.get(x.id);
+            return (
+              <li key={x.id}>
+                <span className="extra-ad-num">Ad {i + 2}</span>
+                {c?.image_id ? <AuthImage imageId={c.image_id} alt="" className="extra-ad-thumb" /> : <span className="extra-ad-thumb" />}
+                <span className="extra-ad-text"><strong>{c?.name ?? "Creative"}</strong><small>v{x.version}{c?.media_type === "video" ? ` · video ${formatDuration(c.video_duration_ms)}` : ""}{c?.headline ? ` · ${c.headline}` : ""}</small></span>
+                <button type="button" className="text-button link-danger" onClick={() => onChange(extras.filter((y) => y.id !== x.id))}>Remove</button>
+              </li>
+            );
+          })}
+        </ol>
+      )}
+      {extras.length < MAX_EXTRA_ADS && (
+        <label className="form-field"><span>Add another ad</span>
+          <select value="" disabled={available.length === 0} onChange={(e) => {
+            const c = available.find((x) => x.id === e.target.value);
+            if (c?.approved_version) onChange([...extras, { id: c.id, version: c.approved_version }]);
+          }}>
+            <option value="">{available.length ? "Choose an approved creative" : "No other approved creatives"}</option>
+            {available.map((c) => <option key={c.id} value={c.id}>{c.name} · v{c.approved_version}{c.media_type === "video" ? " · video" : ""}</option>)}
+          </select></label>
+      )}
+    </section>
+  );
 }
 
 export function studioIssues(f: StudioForm, policy: BudgetPolicy | null, mappedAccount: boolean | null): Issue[] {
@@ -138,6 +183,8 @@ export function studioIssues(f: StudioForm, policy: BudgetPolicy | null, mappedA
   if (needsUrl && !f.url.trim()) e("ad", "Traffic and sales campaigns need a destination URL.");
   if (f.url.trim() && !/^https:\/\/[^\s/]+\.[^\s]+/i.test(f.url.trim())) e("ad", "The destination must be a public https:// link.");
   if (!f.creativeId) w("ad", "No approved creative attached: the copy hasn't been through creative review.");
+  if (f.extraAds.length > 0 && !f.creativeId) e("ad", "Attach the main creative before adding more ads.");
+  if (f.extraAds.length > MAX_EXTRA_ADS) e("ad", `A campaign can have at most ${MAX_EXTRA_ADS + 1} ads.`);
   if (f.objective === "sales") e("goal", "Sales campaigns need a Meta Pixel conversion event, which Campex can't set up yet. Use Leads or Traffic.");
   return out;
 }
@@ -248,7 +295,7 @@ export function CampaignStudio({ client, onOpenChannels, onOpenApprovals }: {
 
   async function attachCreative(id: string) {
     if (!id) {
-      setForm((f) => ({ ...f, creativeId: null, creativeVersion: null, creativeImageId: null, creativeVideoId: null }));
+      setForm((f) => ({ ...f, creativeId: null, creativeVersion: null, creativeImageId: null, creativeVideoId: null, extraAds: [] }));
       setDirty(true);
       return;
     }
@@ -273,6 +320,7 @@ export function CampaignStudio({ client, onOpenChannels, onOpenApprovals }: {
       daily_budget_minor: Math.round(budget * 100), headline: form.headline.trim(), primary_text: form.body.trim(),
       description: form.description.trim() || null, cta: form.cta, destination_url: finalUrl || null, page_id: form.pageId || null,
       creative_asset_id: form.creativeId, creative_version: form.creativeVersion,
+      extra_creatives: form.extraAds.length ? form.extraAds.map((a) => ({ asset_id: a.id, version: a.version })) : null,
     };
   }
 
@@ -339,6 +387,7 @@ export function CampaignStudio({ client, onOpenChannels, onOpenApprovals }: {
         language: form.language, dailyBudget: String(Math.round(c.daily_budget_minor / 100)), headline: c.headline, body: c.primary_text,
         description: c.description ?? "", cta: c.cta, url, utm: false, creativeId: c.creative_asset_id ?? null,
         creativeVersion: c.creative_version ?? null, creativeImageId: null, creativeVideoId: null,
+        extraAds: (c.extra_creatives ?? []).map((r) => ({ id: r.asset_id, version: r.version })),
       });
       if (c.creative_asset_id) {
         getCreative(c.creative_asset_id).then((cr) => {
@@ -536,9 +585,13 @@ export function CampaignStudio({ client, onOpenChannels, onOpenApprovals }: {
               <label className="check-line"><input type="checkbox" checked={form.utm} onChange={(e) => set("utm", e.target.checked)} />Add UTM tags so CRM attribution recognises this campaign</label>
               {finalUrl && form.utm && <p className="utm-preview"><span>Final URL</span><code>{finalUrl}</code></p>}
               {form.creativeId && <p className="targeting-note">Copy is locked to the approved creative. Change it in Creative Studio and approve a new version.</p>}
+              {form.creativeId && (
+                <ExtraAds main={form.creativeId} extras={form.extraAds} creatives={creatives}
+                  onChange={(extraAds) => { setForm((f) => ({ ...f, extraAds })); setDirty(true); setSaveKey(crypto.randomUUID()); }} />
+              )}
               {form.creativeId && (form.url.trim() && form.pageId
-                ? <p className="notice note-info">After an approver publishes the campaign, Campex uploads the {form.creativeVideoId ? "video and its thumbnail" : "image"} to Meta
-                    {form.creativeVideoId ? ", waits until Meta has processed the video," : ""} and creates the ad, paused.</p>
+                ? <p className="notice note-info">After an approver publishes the campaign, Campex uploads the media to Meta
+                    {form.creativeVideoId ? ", waits until Meta has processed videos," : ""} and creates {form.extraAds.length ? `${form.extraAds.length + 1} ads in the same ad set` : "the ad"}, paused.</p>
                 : <p className="notice warn-notice">Add a destination URL and a Facebook Page so Campex can create the ad itself; otherwise add it in Ads Manager.</p>)}
             </Step>
           )}
@@ -558,10 +611,10 @@ export function CampaignStudio({ client, onOpenChannels, onOpenApprovals }: {
                 <div><dt>Audience</dt><dd>{form.location || "—"}, {form.ageMin}–{form.ageMax}</dd></div>
                 <div><dt>Placements</dt><dd>{form.placements.map((p) => PLACEMENTS.find((x) => x.id === p)?.label).join(", ") || "—"}</dd></div>
                 <div><dt>Budget</dt><dd>{inr(budget)}/day · {inr(budget * 30)}/30 days</dd></div>
-                <div><dt>Creative</dt><dd>{form.creativeId ? `Approved v${form.creativeVersion}` : "Not reviewed"}</dd></div>
+                <div><dt>Creative</dt><dd>{form.creativeId ? `Approved v${form.creativeVersion}${form.extraAds.length ? ` · ${form.extraAds.length + 1} ads in one ad set` : ""}` : "Not reviewed"}</dd></div>
                 <div className="span-2"><dt>Destination</dt><dd className="break">{finalUrl || "—"}</dd></div>
               </dl>
-              <p className="notice note-info">What happens next: an approver checks it in Campaign approvals and publishes it. Meta receives a <strong>paused</strong> campaign and ad set; the ad is added in Ads Manager, and nothing spends until someone activates it.</p>
+              <p className="notice note-info">What happens next: an approver checks it in Campaign approvals and publishes it. Meta receives a <strong>paused</strong> campaign and ad set, Campex then creates the ads (also paused), and nothing spends until someone activates it.</p>
             </Step>
           )}
 

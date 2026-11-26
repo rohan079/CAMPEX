@@ -38,6 +38,18 @@ export interface CampaignConfig {
   page_id?: string | null;
   creative_asset_id?: string | null;
   creative_version?: number | null;
+  /** More ads in the same ad set (up to 5 besides the main creative), each with its own approved copy. */
+  extra_creatives?: { asset_id: string; version: number }[] | null;
+}
+
+/** One ad Campex creates in the campaign's ad set; position 1 is the main creative. */
+export interface ExecutionAd {
+  position: number;
+  creative_asset_id: string;
+  creative_version: number;
+  status: AdStatus;
+  error: string | null;
+  meta_ad_id: string | null;
 }
 
 export interface ValidationIssue { field: string; code: string; message: string }
@@ -100,6 +112,7 @@ export interface ExecutionDetail {
   meta_ad_id: string | null;
   meta_video_id: string | null;
   meta_creative_id: string | null;
+  ads?: ExecutionAd[];
 }
 
 export interface AppNotification {
