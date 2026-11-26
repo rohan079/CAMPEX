@@ -14,6 +14,7 @@ public final class CreativeDtos {
     }
 
     public static final String AD_TYPES = "property_launch|apartment|villa|location|amenities|investment|site_visit|limited_offer|other";
+    public static final String ASPECTS = "1:1|4:5|9:16";
 
     public record CopyBrief(
             @Size(max = 80) String businessType,
@@ -36,7 +37,8 @@ public final class CreativeDtos {
             @NotBlank @Size(min = 3, max = 3000) String prompt,
             @Size(max = 12_000_000) String referenceBase64,
             @Pattern(regexp = "image/png|image/jpeg|image/webp") String referenceMime,
-            @Size(max = 40) List<@Size(max = 300) String> facts) {
+            @Size(max = 40) List<@Size(max = 300) String> facts,
+            @Pattern(regexp = ASPECTS) String aspect) {
     }
 
     public record UploadRequest(
@@ -44,7 +46,12 @@ public final class CreativeDtos {
             @Pattern(regexp = AD_TYPES) String adType,
             @NotBlank @Size(max = 12_000_000) String imageBase64,
             @NotBlank @Pattern(regexp = "image/png|image/jpeg|image/webp") String mimeType,
-            @Size(max = 40) List<@Size(max = 300) String> facts) {
+            @Size(max = 40) List<@Size(max = 300) String> facts,
+            @Pattern(regexp = ASPECTS) String aspect) {
+    }
+
+    /** Re-cut the current artwork to an exact Meta size as a new version. */
+    public record ReformatRequest(@jakarta.validation.constraints.NotNull @Pattern(regexp = ASPECTS) String aspect) {
     }
 
     /** A new version. Omitted fields carry over from the current version; an image replaces the artwork. */

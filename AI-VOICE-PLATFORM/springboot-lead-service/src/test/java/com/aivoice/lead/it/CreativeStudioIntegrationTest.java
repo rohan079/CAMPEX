@@ -88,7 +88,7 @@ class CreativeStudioIntegrationTest {
     void setUp() throws Exception {
         when(firebase.verifyIdToken(anyString())).thenAnswer(i -> new VerifiedFirebaseUser(i.getArgument(0), "uid", true));
         when(metaAccess.resolve(any(), any())).thenReturn(new MetaAccess(true, null, List.of(ACCOUNT), "t"));
-        when(ai.image(anyString(), isNull(), isNull())).thenReturn(new GeneratedImage("image/png", PNG_B64, "Villa at dawn. No text.", "gpt-image-1"));
+        when(ai.image(anyString(), isNull(), isNull(), org.mockito.ArgumentMatchers.any())).thenReturn(new GeneratedImage("image/png", PNG_B64, "Villa at dawn. No text.", "gpt-image-1"));
         when(ai.check(anyList(), anyList())).thenReturn(Map.of("unsupported_numbers", List.of(), "flagged_phrases", List.of()));
         client = ok(as("admin@it.test", post("/api/clients"), "{\"name\":\"Creative " + UUID.randomUUID().toString().substring(0, 8)
                 + "\",\"voice_agent_enabled\":false}")).get("id").asText();
@@ -132,6 +132,37 @@ class CreativeStudioIntegrationTest {
         as("stranger@x.test", get("/api/creative/images/" + imageId), null).andExpect(status().isNotFound());
         as("v@c.test", post("/api/clients/" + client + "/creative/generate"), "{\"name\":\"x\",\"prompt\":\"abc\"}")
                 .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void artworkIsMadeExactlyNineBySixteenOnGenerateUploadAndReformat() throws Exception {
+        String realPng = Base64.getEncoder().encodeToString(com.aivoice.lead.service.media.AdImageFormatterTest.png(1024, 1024));
+        when(ai.image(anyString(), isNull(), isNull(), org.mockito.ArgumentMatchers.eq("9:16")))
+                .thenReturn(new GeneratedImage("image/png", realPng, "Villa. No text.", "gpt-image-1"));
+        String generatedId = ok(as("m@c.test", post("/api/clients/" + client + "/creative/generate"),
+                "{\"name\":\"Story\",\"ad_type\":\"villa\",\"prompt\":\"Villa at dawn\",\"aspect\":\"9:16\"}")).at("/asset/id").asText();
+        assertThat(size(generatedId)).containsExactly(1080, 1920);
+
+        String uploadedId = ok(as("m@c.test", post("/api/clients/" + client + "/creative/assets"),
+                "{\"name\":\"Feed\",\"ad_type\":\"villa\",\"image_base64\":\"" + realPng + "\",\"mime_type\":\"image/png\",\"aspect\":\"4:5\"}"))
+                .at("/asset/id").asText();
+        assertThat(size(uploadedId)).containsExactly(1080, 1350);
+
+        editCopy(uploadedId, "East-facing villas", "Book a site visit this weekend");
+        JsonNode reformatted = ok(as("m@c.test", post("/api/creative/assets/" + uploadedId + "/reformat"), "{\"aspect\":\"9:16\"}"));
+        assertThat(reformatted.at("/asset/status").asText()).isEqualTo("EDITING");
+        assertThat(reformatted.at("/versions/0/headline").asText()).isEqualTo("East-facing villas");
+        assertThat(size(uploadedId)).containsExactly(1080, 1920);
+        as("v@c.test", post("/api/creative/assets/" + uploadedId + "/reformat"), "{\"aspect\":\"9:16\"}").andExpect(status().isForbidden());
+        as("m@c.test", post("/api/creative/assets/" + uploadedId + "/reformat"), "{\"aspect\":\"16:9\"}").andExpect(status().isBadRequest());
+    }
+
+    private int[] size(String assetId) throws Exception {
+        String imageId = ok(as("m@c.test", get("/api/creative/assets/" + assetId), null)).at("/asset/image_id").asText();
+        byte[] bytes = as("m@c.test", get("/api/creative/images/" + imageId), null).andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsByteArray();
+        java.awt.image.BufferedImage img = javax.imageio.ImageIO.read(new java.io.ByteArrayInputStream(bytes));
+        return new int[]{img.getWidth(), img.getHeight()};
     }
 
     @Test

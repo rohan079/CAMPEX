@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   approveCreative, archiveCreative, creativeImage, creativeVideo, editCreative, fileToBase64, generateArtwork, generateCopy, getCreative,
-  getMediaLimits, listCreatives, rejectCreative, submitCreative, uploadArtwork, uploadVideoCreative,
+  getMediaLimits, listCreatives, reformatCreative, rejectCreative, submitCreative, uploadArtwork, uploadVideoCreative,
 } from "./creativeApi";
+import { AD_ASPECTS } from "./creativeTypes";
+import type { AdAspect } from "./creativeTypes";
 import {
   AD_TYPES, type ClaimCheck, type CopySuggestions, type CreativeAction, type CreativeDetail, type CreativeStatus,
   type CreativeSummary,
@@ -260,11 +262,36 @@ function CopyGroup({ title, name, options, value, onPick }: { title: string; nam
   );
 }
 
+function AspectPicker({ value, onChange }: { value: AdAspect; onChange: (a: AdAspect) => void }) {
+  return (
+    <div className="form-field"><span>Format <small>Campex saves the artwork at this exact Meta size</small></span>
+      <div className="preset-chips" role="radiogroup" aria-label="Artwork format">
+        {AD_ASPECTS.map((o) => (
+          <button key={o.id} type="button" role="radio" aria-checked={value === o.id} className={`chip${value === o.id ? " active" : ""}`}
+            onClick={() => onChange(o.id)}>{o.label} <small>{o.hint}</small></button>))}
+      </div>
+    </div>
+  );
+}
+
+/** Meta and the server resizer need PNG/JPEG; WebP uploads are converted in the browser first. */
+async function webpToPng(file: File): Promise<File> {
+  const bitmap = await createImageBitmap(file);
+  const canvas = document.createElement("canvas");
+  canvas.width = bitmap.width;
+  canvas.height = bitmap.height;
+  canvas.getContext("2d")?.drawImage(bitmap, 0, 0);
+  const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
+  if (!blob) throw new Error("Could not convert the WebP image; upload a PNG or JPEG.");
+  return new File([blob], file.name.replace(/\.webp$/i, ".png"), { type: "image/png" });
+}
+
 function ArtworkMaker({ clientId, adType, facts, prompt, onPrompt, chosen, onError, onCreated }: {
   clientId: string; adType: string; facts: string[]; prompt: string; onPrompt: (p: string) => void;
   chosen: Record<string, string | undefined>; onError: (e: string | null) => void; onCreated: (id: string) => void;
 }) {
   const [name, setName] = useState("");
+  const [aspect, setAspect] = useState<AdAspect>("9:16");
   const [reference, setReference] = useState<File | null>(null);
   const [upload, setUpload] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
@@ -318,7 +345,7 @@ function ArtworkMaker({ clientId, adType, facts, prompt, onPrompt, chosen, onErr
     if (!checkFile(reference)) return;
     setBusy(true); onError(null);
     try {
-      const detail = await generateArtwork(clientId, { name: name.trim() || "Untitled creative", ad_type: adType, prompt, facts,
+      const detail = await generateArtwork(clientId, { name: name.trim() || "Untitled creative", ad_type: adType, prompt, facts, aspect,
         ...(reference ? { reference_base64: await fileToBase64(reference), reference_mime: reference.type } : {}) });
       await applyCopy(detail);
       onCreated(detail.asset.id);
@@ -329,8 +356,9 @@ function ArtworkMaker({ clientId, adType, facts, prompt, onPrompt, chosen, onErr
     if (!upload || !checkFile(upload)) return;
     setBusy(true); onError(null);
     try {
-      const detail = await uploadArtwork(clientId, { name: name.trim() || upload.name, ad_type: adType, facts,
-        image_base64: await fileToBase64(upload), mime_type: upload.type });
+      const image = upload.type === "image/webp" ? await webpToPng(upload) : upload;
+      const detail = await uploadArtwork(clientId, { name: name.trim() || upload.name, ad_type: adType, facts, aspect,
+        image_base64: await fileToBase64(image), mime_type: image.type });
       await applyCopy(detail);
       onCreated(detail.asset.id);
     } catch (err) { onError(errorText(err, "Could not upload the image")); } finally { setBusy(false); }
@@ -339,6 +367,7 @@ function ArtworkMaker({ clientId, adType, facts, prompt, onPrompt, chosen, onErr
   return (
     <div className="artwork-maker">
       <label className="form-field"><span>Creative name</span><input value={name} maxLength={160} onChange={(e) => setName(e.target.value)} placeholder="Diwali site-visit villa" /></label>
+      <AspectPicker value={aspect} onChange={setAspect} />
       <label className="form-field"><span>Describe the artwork <small>text, prices and logos are never drawn into the image</small></span>
         <textarea rows={3} maxLength={3000} value={prompt} onChange={(e) => onPrompt(e.target.value)} placeholder="Warm evening light on an east-facing villa with a lawn, family arriving" /></label>
       <div className="form-grid-2">
@@ -426,6 +455,16 @@ function CreativeDrawer({ id, chosen, onClose, onChanged }: { id: string; chosen
                 <span className="ad-preview-cta">{ctaLabel(draft.cta)}</span></div>
             </div>
             {current.image_source === "ai_generated" && <p className="targeting-note">AI-generated artwork · illustrative only, not a factual claim.</p>}
+            {allowed.has("edit") && !current.video_id && (
+              <div className="reformat-row" role="group" aria-label="Resize artwork">
+                <span>Resize artwork</span>
+                {AD_ASPECTS.map((o) => (
+                  <button key={o.id} type="button" className="chip" disabled={busy !== null} title={o.hint}
+                    onClick={() => void run("edit", () => reformatCreative(id, o.id),
+                      `Made a ${o.label} version (${o.hint.split(" · ")[1]}). Review and approve it again before using it.`)}>
+                    Make {o.label}</button>))}
+              </div>
+            )}
 
             {allowed.has("edit") && (
               <section className="config-form">

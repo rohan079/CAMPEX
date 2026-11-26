@@ -103,3 +103,22 @@ def test_endpoints_require_the_service_key():
             assert response.json()["unsupported_numbers"]
     finally:
         app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_vertical_aspect_asks_for_the_tallest_size_and_vertical_composition():
+    seen = {}
+    png = base64.b64encode(b"\x89PNG fake").decode()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["body"] = json.loads(request.content)
+        return httpx.Response(200, json={"data": [{"b64_json": png}]})
+
+    for model, size in (("gpt-image-1", "1024x1536"), ("dall-e-3", "1024x1792")):
+        settings = Settings(ai_api_key="k", ai_image_model=model)
+        await generate_ad_image(settings, "Villa", transport=httpx.MockTransport(handler), aspect="9:16")
+        assert seen["body"]["size"] == size
+        assert "9:16" in seen["body"]["prompt"]
+    await generate_ad_image(Settings(ai_api_key="k", ai_image_model="gpt-image-1"), "Villa",
+                            transport=httpx.MockTransport(handler), aspect="1:1")
+    assert seen["body"]["size"] == "1024x1024"

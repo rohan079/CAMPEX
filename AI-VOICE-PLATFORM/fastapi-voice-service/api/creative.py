@@ -45,6 +45,7 @@ class ImageRequest(BaseModel):
     prompt: str = Field(min_length=3, max_length=3000)
     reference_base64: str | None = Field(default=None, max_length=12_000_000)
     reference_mime: Literal["image/png", "image/jpeg", "image/webp"] | None = None
+    aspect: Literal["1:1", "4:5", "9:16"] | None = None
 
 
 @router.post("/copy")
@@ -78,6 +79,6 @@ async def generate_image(body: ImageRequest, request: Request) -> dict:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "Reference image must be 8 MB or smaller")
         reference = (data, body.reference_mime)
     try:
-        return await generate_ad_image(request.app.state.settings, body.prompt, reference)
+        return await generate_ad_image(request.app.state.settings, body.prompt, reference, aspect=body.aspect)
     except ImageGenerationError as exc:
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(exc)) from exc

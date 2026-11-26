@@ -64,6 +64,11 @@ public class CreativeStudioController {
         return creative.edit(asset(id), body);
     }
 
+    @PostMapping("/api/creative/assets/{id}/reformat")
+    public AssetDetail reformat(@PathVariable String id, @Valid @RequestBody com.aivoice.lead.dto.CreativeDtos.ReformatRequest body) {
+        return creative.reformat(asset(id), body.aspect());
+    }
+
     @PostMapping("/api/creative/assets/{id}/submit")
     public AssetDetail submit(@PathVariable String id) {
         return creative.submit(asset(id));

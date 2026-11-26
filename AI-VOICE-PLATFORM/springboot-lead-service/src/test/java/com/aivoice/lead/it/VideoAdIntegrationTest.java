@@ -229,6 +229,19 @@ class VideoAdIntegrationTest {
     }
 
     @Test
+    void unexpectedErrorsFailVisiblyInsteadOfStayingStuck() throws Exception {
+        String creative = approvedVideo();
+        int version = ok(as("m@v.test", get("/api/creative/assets/" + creative), null)).at("/asset/approved_version").asInt();
+        String exec = publishedWith(creative, version, true);
+        when(meta.uploadImage(anyString(), anyString(), anyString(), any())).thenThrow(new IllegalStateException("boom"));
+        ok(as("m@v.test", post("/api/campaign-executions/" + exec + "/publish"), "{\"confirm\":true}"));
+        JsonNode failed = ok(as("m@v.test", post("/api/campaign-executions/" + exec + "/ad/check"), null));
+        assertThat(failed.get("ad_status").asText()).isEqualTo("failed");
+        assertThat(failed.get("ad_error").asText()).contains("unexpected error").doesNotContain("boom");
+        assertThat(failed.get("allowed_actions").toString()).contains("ad_retry");
+    }
+
+    @Test
     void campaignsWithoutCreativeOrUrlSkipAdCreationWithAReason() throws Exception {
         String exec = publishedWith(null, 0, true);
         JsonNode published = ok(as("m@v.test", post("/api/campaign-executions/" + exec + "/publish"), "{\"confirm\":true}"));

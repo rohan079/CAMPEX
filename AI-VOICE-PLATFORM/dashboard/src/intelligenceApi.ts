@@ -18,6 +18,9 @@ const body = (method: string, value?: unknown): RequestInit => ({ method, body: 
 
 export const getOverview = (clientId: string, r: DateRange, campaignId?: string) =>
   request<Overview>(`${c(clientId)}/performance/overview${q({ ...r, campaign_id: campaignId })}`);
+export interface CampaignOption { id: string; name: string | null; status: string | null; ad_account_id: string | null; has_data: boolean }
+export const getCampaignOptions = (clientId: string) =>
+  request<{ campaigns: CampaignOption[]; note: string | null }>(`${c(clientId)}/performance/campaign-options`);
 export const getPerformance = (clientId: string, level: "campaigns" | "adsets" | "ads", r: DateRange, campaignId?: string) =>
   request<PerformanceReport>(`${c(clientId)}/performance/${level}${q({ ...r, campaign_id: campaignId })}`);
 export const getTrends = (clientId: string, r: DateRange, campaignId?: string) =>

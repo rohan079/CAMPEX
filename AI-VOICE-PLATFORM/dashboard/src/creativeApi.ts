@@ -1,5 +1,7 @@
 import { request, requestBlob, uploadForm } from "./api";
+import type { AdAspect } from "./creativeTypes";
 import type { CopyBrief, CopySuggestions, CreativeDetail, CreativeEdit, CreativeSummary } from "./creativeTypes";
+
 
 /** Phase 3 Creative Studio endpoints. Generated artwork is stored by Campex; nothing here touches Meta. */
 
@@ -9,13 +11,15 @@ const post = (value?: unknown): RequestInit => ({ method: "POST", body: value ==
 
 export const generateCopy = (clientId: string, brief: CopyBrief) => request<CopySuggestions>(`${c(clientId)}/copy`, post(brief));
 export const generateArtwork = (clientId: string, body: { name: string; ad_type: string; prompt: string; facts: string[];
-  reference_base64?: string; reference_mime?: string }) => request<CreativeDetail>(`${c(clientId)}/generate`, post(body));
-export const uploadArtwork = (clientId: string, body: { name: string; ad_type: string; image_base64: string; mime_type: string; facts: string[] }) =>
+  reference_base64?: string; reference_mime?: string; aspect?: AdAspect }) => request<CreativeDetail>(`${c(clientId)}/generate`, post(body));
+export const uploadArtwork = (clientId: string, body: { name: string; ad_type: string; image_base64: string; mime_type: string; facts: string[]; aspect?: AdAspect }) =>
   request<CreativeDetail>(`${c(clientId)}/assets`, post(body));
 export const listCreatives = (clientId: string, status?: string) =>
   request<CreativeSummary[]>(`${c(clientId)}/assets${status ? `?status=${encodeURIComponent(status)}` : ""}`);
 export const getCreative = (id: string) => request<CreativeDetail>(a(id));
 export const editCreative = (id: string, body: CreativeEdit) => request<CreativeDetail>(a(id), { method: "PUT", body: JSON.stringify(body) });
+/** Re-cuts the current artwork to an exact Meta size as a new version (goes back to review). */
+export const reformatCreative = (id: string, aspect: AdAspect) => request<CreativeDetail>(`${a(id)}/reformat`, post({ aspect }));
 export const submitCreative = (id: string) => request<CreativeDetail>(`${a(id)}/submit`, post());
 export const approveCreative = (id: string, claimsAcknowledged: boolean, note?: string) =>
   request<CreativeDetail>(`${a(id)}/approve`, post({ claims_acknowledged: claimsAcknowledged, note }));

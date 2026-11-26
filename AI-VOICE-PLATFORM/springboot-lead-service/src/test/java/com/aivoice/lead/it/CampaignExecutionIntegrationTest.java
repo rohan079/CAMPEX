@@ -299,6 +299,24 @@ class CampaignExecutionIntegrationTest {
     }
 
     @Test
+    void campaignOptionsListLiveMetaCampaignsAndPublishedOnesEvenWithoutDelivery() throws Exception {
+        when(meta.publish(eq(TOKEN), any())).thenReturn(new PublishResult(RUN + "5501", RUN + "5502", null, "PAUSED", null));
+        publish(approved("Paused launch"));
+        when(meta.campaignStatuses(TOKEN, ACCOUNT)).thenReturn(List.of(
+                new com.aivoice.lead.service.automation.RuleEvaluator.CampaignStatus(RUN + "5600", "Older live campaign", "ACTIVE", "ACTIVE")));
+
+        JsonNode options = ok(as("viewer@a.test", get("/api/clients/" + clientA + "/performance/campaign-options"), null));
+        assertThat(options.get("campaigns").findValuesAsText("id")).contains(RUN + "5501", RUN + "5600");
+        assertThat(options.toString()).contains("Older live campaign").contains("Paused launch");
+
+        when(meta.campaignStatuses(anyString(), anyString())).thenThrow(new GatewayException("down", null));
+        JsonNode fallback = ok(as("manager@a.test", get("/api/clients/" + clientA + "/performance/campaign-options"), null));
+        assertThat(fallback.get("campaigns").findValuesAsText("id")).contains(RUN + "5501").doesNotContain(RUN + "5600");
+        assertThat(fallback.get("note").asText()).contains("live campaign list");
+        as("manager@a.test", get("/api/clients/" + clientB + "/performance/campaign-options"), null).andExpect(status().isNotFound());
+    }
+
+    @Test
     void typedLocationWarnsAndOldConfigsKeepTheirHash() throws Exception {
         JsonNode created = ok(as("manager@a.test", post("/api/clients/" + clientA + "/campaign-executions"), config(50_000, "Typed")));
         String id = created.at("/execution/id").asText();

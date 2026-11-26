@@ -7,6 +7,7 @@ import com.aivoice.lead.dto.CreativeDtos.AssetSummary;
 import com.aivoice.lead.dto.CreativeDtos.ClaimCheck;
 import com.aivoice.lead.dto.CreativeDtos.CopyBrief;
 import com.aivoice.lead.dto.CreativeDtos.EditRequest;
+import com.aivoice.lead.service.media.AdImageFormatter;
 import com.aivoice.lead.dto.CreativeDtos.GenerateImageRequest;
 import com.aivoice.lead.dto.CreativeDtos.UploadRequest;
 import com.aivoice.lead.dto.CreativeDtos.VersionDto;
@@ -112,9 +113,15 @@ public class CreativeStudioService {
         if (req.referenceBase64() != null) {
             decode(req.referenceBase64());
         }
-        GeneratedImage image = ai.image(req.prompt(), req.referenceBase64(), req.referenceMime());
+        GeneratedImage image = ai.image(req.prompt(), req.referenceBase64(), req.referenceMime(), req.aspect());
         byte[] bytes = decode(image.dataBase64());
-        return createAsset(clientId, actor, req.name(), req.adType(), bytes, image.mimeType(), "ai_generated",
+        String mime = image.mimeType();
+        if (req.aspect() != null) {
+            AdImageFormatter.Formatted f = AdImageFormatter.format(bytes, req.aspect());
+            bytes = f.bytes();
+            mime = f.mimeType();
+        }
+        return createAsset(clientId, actor, req.name(), req.adType(), bytes, mime, "ai_generated",
                 image.prompt(), image.model(), facts(req.facts()), "GENERATED");
     }
 
@@ -122,7 +129,13 @@ public class CreativeStudioService {
         Actor actor = access.require(clientId, Permission.MANAGE);
         byte[] bytes = decode(req.imageBase64());
         requireImage(bytes, req.mimeType());
-        return createAsset(clientId, actor, req.name(), req.adType(), bytes, req.mimeType(), "uploaded", null, null,
+        String mime = req.mimeType();
+        if (req.aspect() != null) {
+            AdImageFormatter.Formatted f = AdImageFormatter.format(bytes, req.aspect());
+            bytes = f.bytes();
+            mime = f.mimeType();
+        }
+        return createAsset(clientId, actor, req.name(), req.adType(), bytes, mime, "uploaded", null, null,
                 facts(req.facts()), "EDITING");
     }
 
@@ -285,6 +298,26 @@ public class CreativeStudioService {
             audit.record(clientId, actor.email(), ENTITY, assetId, "edited", Map.of("version", version, "from_status", status));
         });
         return detail(assetId);
+    }
+
+    /**
+     * Re-cuts the current artwork to an exact Meta size (e.g. 1080x1920 for Stories/Reels) as a new version. The copy
+     * carries over; the creative goes back to editing, so the new artwork is reviewed before it can be used.
+     */
+    public AssetDetail reformat(UUID assetId, String aspect) {
+        UUID clientId = clientOf(assetId);
+        access.require(clientId, Permission.MANAGE);
+        Map<String, Object> asset = jdbc.queryForMap("SELECT media_type, current_version FROM creative_assets WHERE id = ?", assetId);
+        if ("video".equals(asset.get("media_type"))) {
+            throw new IllegalArgumentException("A video's shape comes from the video file. Upload a 9:16 video for Stories and Reels.");
+        }
+        Map<String, Object> cur = currentVersion(assetId, (Integer) asset.get("current_version"));
+        ImageBytes image = jdbc.query("SELECT bytes, mime_type FROM creative_images WHERE id = ?",
+                (rs, i) -> new ImageBytes(rs.getBytes("bytes"), rs.getString("mime_type")), cur.get("image_id")).getFirst();
+        AdImageFormatter.Formatted f = AdImageFormatter.format(image.bytes(), aspect);
+        return edit(assetId, new EditRequest(null, null, null, null, null, null,
+                java.util.Base64.getEncoder().encodeToString(f.bytes()), f.mimeType(),
+                "Resized to " + aspect + " (" + f.width() + "x" + f.height() + ", " + f.mode() + ")"));
     }
 
     /** Runs the deterministic claim check on the current version and asks for review. */
