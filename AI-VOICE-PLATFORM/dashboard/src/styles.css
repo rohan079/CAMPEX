@@ -1888,3 +1888,16 @@ video.ad-preview-image, video.mock-image { background: #000; object-fit: contain
 .location-status { display: block; margin-top: 6px; font-size: 0.82rem; opacity: 0.8; }
 .location-status.ok { color: #15803d; opacity: 1; }
 .location-status.warn { color: #b45309; opacity: 1; }
+
+.extra-ads { display: grid; gap: 8px; margin-top: 6px; padding: 12px; border: 1px dashed var(--border); border-radius: 10px; }
+.extra-ads h4 { margin: 0; font-size: .95rem; }
+.extra-ads h4 small { font-weight: 400; color: var(--text-2); margin-left: 6px; }
+.extra-ad-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.extra-ad-list li { display: grid; grid-template-columns: auto 40px 1fr auto; gap: 10px; align-items: center; }
+.extra-ad-num { font-size: .75rem; color: var(--text-2); white-space: nowrap; }
+.extra-ad-thumb { width: 40px; height: 40px; border-radius: 6px; object-fit: cover; background: var(--surface-2); display: block; }
+.extra-ad-text { display: grid; min-width: 0; }
+.extra-ad-text strong, .extra-ad-text small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.extra-ad-text small { color: var(--text-2); }
+.ad-status-list { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 6px; }
+.ad-status-list li > span:first-child { font-size: .8rem; color: var(--text-2); margin-right: 4px; }

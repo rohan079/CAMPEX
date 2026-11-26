@@ -228,6 +228,81 @@ class VideoAdIntegrationTest {
         verify(meta, never()).createAd(anyString(), anyString(), anyString(), anyString(), anyString());
     }
 
+    String approvedImage(String headline) throws Exception {
+        String id = ok(as("m@v.test", post("/api/clients/" + client + "/creative/assets"), "{\"name\":\"Lawn photo\",\"ad_type\":\"villa\","
+                + "\"image_base64\":\"" + java.util.Base64.getEncoder().encodeToString(PNG) + "\",\"mime_type\":\"image/png\"}")).at("/asset/id").asText();
+        ok(as("m@v.test", put("/api/creative/assets/" + id), "{\"headline\":\"" + headline + "\",\"primary_text\":\"Walk the lawns this weekend.\",\"cta\":\"BOOK_NOW\"}"));
+        ok(as("m@v.test", post("/api/creative/assets/" + id + "/submit"), null));
+        ok(as("m@v.test", post("/api/creative/assets/" + id + "/approve"), "{}"));
+        return id;
+    }
+
+    @Test
+    void severalCreativesBecomeSeparatePausedAdsInOneAdSetAndRetryOnlyTheFailedOne() throws Exception {
+        String video = approvedVideo();
+        String image = approvedImage("Green lawns near Guntur");
+        String c = RUN + SEQ.incrementAndGet(), adset = RUN + SEQ.incrementAndGet();
+        when(meta.publish(eq("tok"), any())).thenReturn(new PublishResult(c, adset, null, "PAUSED", null));
+        String body = "{\"ad_account_id\":\"" + ACCOUNT + "\",\"name\":\"Tour\",\"objective\":\"leads\",\"platforms\":[\"facebook\"],"
+                + "\"location\":\"Guntur\",\"age_min\":25,\"age_max\":55,\"daily_budget_minor\":50000,\"headline\":\"Villas near Guntur\","
+                + "\"primary_text\":\"Watch the tour.\",\"cta\":\"LEARN_MORE\",\"page_id\":\"42\",\"destination_url\":\"https://greenfields.example/villas\","
+                + "\"creative_asset_id\":\"" + video + "\",\"creative_version\":2,\"extra_creatives\":[{\"asset_id\":\"" + image + "\",\"version\":2}]}";
+        String exec = ok(as("m@v.test", post("/api/clients/" + client + "/campaign-executions"), body)).at("/execution/id").asText();
+        JsonNode report = ok(as("m@v.test", post("/api/campaign-executions/" + exec + "/validate"), null));
+        assertThat(report.get("valid").asBoolean()).as(report.toString()).isTrue();
+        ok(as("m@v.test", post("/api/campaign-executions/" + exec + "/submit"), null));
+        ok(as("m@v.test", post("/api/campaign-executions/" + exec + "/approve"), "{}"));
+
+        when(meta.uploadImage(anyString(), anyString(), anyString(), any())).thenReturn("h1", "h2");
+        when(meta.uploadVideo(anyString(), anyString(), anyString(), any(Path.class), anyString())).thenReturn("vid1");
+        when(meta.videoStatus("tok", "vid1")).thenReturn("ready");
+        when(meta.createCreative(anyString(), any())).thenReturn("cr1", "cr2");
+        when(meta.findAds(anyString(), anyString(), anyString())).thenReturn(List.of());
+        when(meta.createAd(anyString(), anyString(), anyString(), eq("cr1"), anyString())).thenReturn("ad1");
+        when(meta.createAd(anyString(), anyString(), anyString(), eq("cr2"), anyString()))
+                .thenThrow(new GatewayException("Meta rejected the request (code 100)", null));
+        JsonNode published = ok(as("m@v.test", post("/api/campaign-executions/" + exec + "/publish"), "{\"confirm\":true}"));
+        assertThat(published.get("ads")).hasSize(2);
+        JsonNode partial = ok(as("m@v.test", post("/api/campaign-executions/" + exec + "/ad/check"), null));
+        assertThat(partial.get("ad_status").asText()).isEqualTo("failed");
+        assertThat(partial.at("/ads/0/status").asText()).isEqualTo("created");
+        assertThat(partial.at("/ads/0/meta_ad_id").asText()).isEqualTo("ad1");
+        assertThat(partial.at("/ads/1/status").asText()).isEqualTo("failed");
+        assertThat(partial.get("ad_error").asText()).startsWith("Ad 2:").contains("code 100");
+
+        ArgumentCaptor<MetaExecutionGateway.CreativeSpec> specs = ArgumentCaptor.forClass(MetaExecutionGateway.CreativeSpec.class);
+        verify(meta, times(2)).createCreative(anyString(), specs.capture());
+        assertThat(specs.getAllValues().get(0).kind()).isEqualTo("video");
+        assertThat(specs.getAllValues().get(1).kind()).isEqualTo("image");
+        assertThat(specs.getAllValues().get(1).headline()).isEqualTo("Green lawns near Guntur");
+        assertThat(specs.getAllValues().get(1).cta()).isEqualTo("BOOK_NOW");
+        String tag = partial.get("publish_tag").asText();
+        verify(meta).findAds(anyString(), eq(adset), eq("[" + tag + "]"));
+        verify(meta).findAds(anyString(), eq(adset), eq("[" + tag + "-2]"));
+
+        org.mockito.Mockito.doReturn("ad2").when(meta).createAd(anyString(), anyString(), anyString(), eq("cr2"), anyString());
+        JsonNode retried = ok(as("m@v.test", post("/api/campaign-executions/" + exec + "/ad/retry"), null));
+        assertThat(retried.get("ad_status").asText()).isEqualTo("created");
+        assertThat(retried.at("/ads/1/meta_ad_id").asText()).isEqualTo("ad2");
+        verify(meta, times(1)).createAd(anyString(), anyString(), anyString(), eq("cr1"), anyString());
+        verify(meta, times(2)).uploadImage(anyString(), anyString(), anyString(), any());
+        verify(meta, times(2)).createCreative(anyString(), any());
+    }
+
+    @Test
+    void extraCreativesMustBeApprovedAndDistinct() throws Exception {
+        String video = approvedVideo();
+        String body = "{\"ad_account_id\":\"" + ACCOUNT + "\",\"name\":\"Tour\",\"objective\":\"leads\",\"platforms\":[\"facebook\"],"
+                + "\"location\":\"Guntur\",\"age_min\":25,\"age_max\":55,\"daily_budget_minor\":50000,\"headline\":\"Villas near Guntur\","
+                + "\"primary_text\":\"Watch the tour.\",\"cta\":\"LEARN_MORE\",\"page_id\":\"42\",\"creative_asset_id\":\"" + video
+                + "\",\"creative_version\":2,\"extra_creatives\":[{\"asset_id\":\"" + video + "\",\"version\":2},"
+                + "{\"asset_id\":\"" + UUID.randomUUID() + "\",\"version\":1}]}";
+        String exec = ok(as("m@v.test", post("/api/clients/" + client + "/campaign-executions"), body)).at("/execution/id").asText();
+        JsonNode report = ok(as("m@v.test", post("/api/campaign-executions/" + exec + "/validate"), null));
+        assertThat(report.get("valid").asBoolean()).isFalse();
+        assertThat(report.get("errors").findValuesAsText("code")).contains("duplicate", "not_approved");
+    }
+
     @Test
     void unexpectedErrorsFailVisiblyInsteadOfStayingStuck() throws Exception {
         String creative = approvedVideo();

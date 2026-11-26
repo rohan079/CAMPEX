@@ -34,7 +34,19 @@ public final class CampaignExecutionDtos {
             @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
             @Size(max = 64) String locationKey,
             @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
-            @Size(max = 16) String locationType) {
+            @Size(max = 16) String locationType,
+            // More ads in the same ad set (up to 5 besides the main creative). Left out of the JSON when empty.
+            @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_EMPTY)
+            @Size(max = 5) List<@jakarta.validation.Valid CreativeRef> extraCreatives) {
+    }
+
+    /** An approved creative version used as one ad. */
+    public record CreativeRef(@Size(max = 64) String assetId, Integer version) {
+    }
+
+    /** One ad Campex creates in the campaign's ad set. */
+    public record AdDto(int position, String creativeAssetId, int creativeVersion, String status, String error,
+                        String metaAdId) {
     }
 
     /** A place Meta can target, from Meta's location search. */
@@ -77,7 +89,7 @@ public final class CampaignExecutionDtos {
                                   String metaAdsetId, Instant metaCheckedAt, List<VersionDto> versions,
                                   List<ApprovalDto> approvals, List<StepDto> steps,
                                   List<String> allowedActions, String adStatus, String adError, String metaAdId,
-                                  String metaVideoId, String metaCreativeId) {
+                                  String metaVideoId, String metaCreativeId, List<AdDto> ads) {
     }
 
     public record NotificationDto(String id, String clientId, String type, String severity, String title,

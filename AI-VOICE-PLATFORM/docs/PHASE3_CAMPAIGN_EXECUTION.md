@@ -469,6 +469,27 @@ fail with "Meta could not match the target location".
 - When Meta rejects a request, the error now includes Meta's subcode and its own explanation (`error_user_title`,
   `error_user_msg`, `message`), with anything that looks like a token removed.
 
+## 6g. Several ads in one ad set
+
+A campaign keeps one ad set (one audience, budget and placement set) and can hold up to **6 ads**: the main approved
+creative plus up to 5 more in `extra_creatives` (`[{asset_id, version}]`). Meta shares the ad set budget between them and
+delivers more of the best performer.
+
+- **Copy.** Each ad uses its own approved copy. The main ad uses the campaign's headline and text, which must match its
+  creative. Extra ads use the approved version's headline, primary text, description and call to action.
+- **Validation.** Each extra creative must be approved at the attached version, appear only once in the campaign, and
+  come with a main creative.
+- **Tracking.** `campaign_execution_ads` (migration V22) has one row per ad, with its own status, Meta IDs, error and
+  next check. `campaign_executions.ad_status` is the summary: any ad still in progress shows as in progress; otherwise
+  `failed` if any ad failed, else `created`. `ad_error` lists the failures as "Ad 2: …".
+- **No duplicates.** The first ad is named `… [cx-tag]` and the others `… [cx-tag-2]` … `[cx-tag-6]`. The bracketed
+  label is looked up before creating, so a retry links an existing ad instead of creating it again. The campaign-name
+  part is shortened so the label always fits Meta's 100-character ad name.
+- **Retry.** Retry only restarts the failed ads, reusing any media and creative IDs they already have. Ads that were
+  created are left alone.
+- **Studio and approvals.** On Studio's Ad step, "More ads in this ad set" adds or removes approved creatives. Campaign
+  approvals lists each ad with its own status.
+
 ## 7. Roles and permissions
 
 Spec roles map onto the existing per-client roles (no schema change needed yet):

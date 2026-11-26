@@ -467,6 +467,9 @@ public class CampaignExecutionService {
                 complete ? "PUBLISHED_PAUSED" : "FAILED", complete ? "created" : "partial", campaignId, adsetId, adId,
                 complete ? null : "Meta created the campaign (paused) but not the ad set. Finish or delete it in Ads Manager.",
                 now, now, adStatus, "skipped".equals(adStatus) ? AdCreationService.skipReason(row.config) : null, id);
+        if ("pending".equals(adStatus)) {
+            ads.schedule(id, row.config);
+        }
         Map<String, Object> ids = new LinkedHashMap<>();
         ids.put("campaign_id", campaignId);
         ids.put("adset_id", adsetId);
@@ -476,7 +479,7 @@ public class CampaignExecutionService {
         notifications.notifyClientManagers(clientId, actor.email(),
                 complete ? "campaign_published" : "campaign_publish_failed", complete ? "info" : "critical",
                 (complete ? "Published (paused): " : "Partly published: ") + row.name,
-                complete ? "Campaign and ad set were created in Meta in PAUSED status. Add the ad and review it in Ads Manager before activating."
+                complete ? "Campaign and ad set were created in Meta in PAUSED status. Review them in Ads Manager before activating."
                         : "The campaign exists in Meta but the ad set could not be created.",
                 ENTITY, id);
     }
@@ -640,8 +643,15 @@ public class CampaignExecutionService {
                     versions, approvals, steps, adActions(withRevise(allowedActions(status, rs.getString("meta_campaign_id") != null), status,
                             rs.getString("meta_campaign_id") != null, rs.getString("publish_outcome")), rs.getString("ad_status")),
                     rs.getString("ad_status"), rs.getString("ad_error"), rs.getString("meta_ad_id"), rs.getString("meta_video_id"),
-                    rs.getString("meta_creative_id"));
+                    rs.getString("meta_creative_id"), adsOf(id));
         }, id).stream().findFirst().orElseThrow(() -> new NotFoundException("Campaign execution not found"));
+    }
+
+    private List<com.aivoice.lead.dto.CampaignExecutionDtos.AdDto> adsOf(UUID id) {
+        return jdbc.query("SELECT position, creative_asset_id, creative_version, status, error, meta_ad_id FROM campaign_execution_ads "
+                        + "WHERE execution_id = ? ORDER BY position",
+                (rs, i) -> new com.aivoice.lead.dto.CampaignExecutionDtos.AdDto(rs.getInt("position") + 1, rs.getString("creative_asset_id"),
+                        rs.getInt("creative_version"), rs.getString("status"), rs.getString("error"), rs.getString("meta_ad_id")), id);
     }
 
     static List<String> withRevise(List<String> actions, String status, boolean hasMetaCampaign, String outcome) {
@@ -687,7 +697,9 @@ public class CampaignExecutionService {
                 c.cta() == null ? null : c.cta().trim().toUpperCase(Locale.ROOT).replace(' ', '_'),
                 trim(c.destinationUrl()), trim(c.pageId()), trim(c.creativeAssetId()), c.creativeVersion(),
                 blankToNull(trim(c.locationKey())), c.locationType() == null || c.locationType().isBlank() ? null
-                        : c.locationType().trim().toLowerCase(Locale.ROOT));
+                        : c.locationType().trim().toLowerCase(Locale.ROOT),
+                c.extraCreatives() == null || c.extraCreatives().isEmpty() ? null : c.extraCreatives().stream()
+                        .map(r -> new com.aivoice.lead.dto.CampaignExecutionDtos.CreativeRef(trim(r.assetId()), r.version())).toList());
     }
 
     String hash(CampaignConfig config) {

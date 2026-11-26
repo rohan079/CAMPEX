@@ -156,6 +156,32 @@ public final class CampaignValidator {
             }
         }
 
+        List<com.aivoice.lead.dto.CampaignExecutionDtos.CreativeRef> extras = c.extraCreatives() == null ? List.of() : c.extraCreatives();
+        if (!extras.isEmpty()) {
+            if (creativeId.isEmpty()) {
+                errors.add(issue("extra_creatives", "needs_main", "Attach the main creative before adding more ads."));
+            }
+            if (extras.size() > 5) {
+                errors.add(issue("extra_creatives", "too_many", "A campaign can have at most 6 ads (the main creative and 5 more)."));
+            }
+            java.util.Set<String> seen = new java.util.HashSet<>();
+            seen.add(creativeId);
+            int n = 2;
+            for (var ref : extras) {
+                String id = ref == null ? "" : trim(ref.assetId());
+                ApprovedCreative approved = id.isEmpty() ? null : ctx.approvedCreatives().get(id);
+                if (approved == null) {
+                    errors.add(issue("extra_creatives", "not_approved", "Ad " + n + ": the creative is not approved for this client."));
+                } else if (ref.version() == null || ref.version() != approved.version()) {
+                    errors.add(issue("extra_creatives", "stale_version", "Ad " + n + ": attach the approved version (v" + approved.version() + ")."));
+                }
+                if (!id.isEmpty() && !seen.add(id)) {
+                    errors.add(issue("extra_creatives", "duplicate", "Ad " + n + " uses a creative that is already in this campaign."));
+                }
+                n++;
+            }
+        }
+
         if (!creativeId.isEmpty() && (url.isEmpty() || trim(c.pageId()).isEmpty())) {
             warnings.add(issue("ad", "not_created", "Campex creates the ad from the approved creative only with a destination URL "
                     + "and a Facebook Page. Without them, add the ad in Ads Manager."));

@@ -126,6 +126,18 @@ describe("Ad creation status", () => {
 });
 
 describe("Notification bell", () => {
+  it("lists each ad in the ad set with its own status", async () => {
+    m.getExecution.mockResolvedValue({ ...detail("PUBLISHED_PAUSED", ["reconcile", "ad_retry"]), ad_status: "failed", ad_error: "Ad 2: Meta rejected it",
+      ads: [{ position: 1, creative_asset_id: "cr1", creative_version: 2, status: "created", error: null, meta_ad_id: "9001" },
+        { position: 2, creative_asset_id: "cr2", creative_version: 2, status: "failed", error: "Meta rejected it", meta_ad_id: null }] });
+    render(<CampaignApprovalsPage clientId="c1" focusId="e1" />);
+    const dialog = await screen.findByRole("dialog", { name: "Green Villas launch" });
+    const list = await within(dialog).findByRole("list", { name: "Ads in this ad set" });
+    expect(within(list).getByText("Ad created (paused)")).toBeTruthy();
+    expect(within(list).getByText("Meta rejected it")).toBeTruthy();
+    expect(within(dialog).getByRole("button", { name: "Retry ad creation" })).toBeTruthy();
+  });
+
   it("a rejected publish is revised with a location picked from Meta", async () => {
     m.getExecution.mockResolvedValue(detail("FAILED", ["retry", "reconcile", "cancel", "revise"], { publish_outcome: "rejected",
       last_error: "Meta rejected the publish: Meta could not match the target location." }));
