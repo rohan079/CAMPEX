@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   approveExecution, cancelExecution, checkAd, retryAd, createExecution, getExecution, listExecutions, publishExecution,
-  reconcileExecution, rejectExecution, retryExecution, reviseExecution, submitExecution, updateExecution, validateExecution,
+  reconcileExecution, rejectExecution, retryExecution, reviseExecution, activateExecution, pauseExecution, submitExecution, updateExecution, validateExecution,
 } from "./executionApi";
 import { LocationPicker } from "./LocationPicker";
 import type {
@@ -163,6 +163,7 @@ function ExecutionDrawer({ id, onClose, onChanged }: { id: string; onClose: () =
   const [rejectNote, setRejectNote] = useState("");
   const [rejecting, setRejecting] = useState(false);
   const [confirmPublish, setConfirmPublish] = useState(false);
+  const [confirmActivate, setConfirmActivate] = useState(false);
   const [editing, setEditing] = useState(false);
 
   const refresh = useCallback(async () => {
@@ -209,8 +210,25 @@ function ExecutionDrawer({ id, onClose, onChanged }: { id: string; onClose: () =
               onRetry={() => run("ad_retry", () => retryAd(id), "Retrying ad creation.")}
               onCheck={() => run("ad_check", () => checkAd(id), "Checked with Meta.")} />}
             {ex.status === "PUBLISHED_PAUSED" && (
-              <p className="notice success-notice">Created in Meta as <strong>paused</strong>. Nothing is delivering. Review the
-                campaign in Ads Manager before activating it.</p>
+              <section className="go-live" aria-label="Go live">
+                <p className="notice success-notice">In Meta as <strong>paused</strong>. Nothing is delivering yet.
+                  {allowed.has("activate") ? " Activate it here when you're ready; no need to open Ads Manager."
+                    : detail.ad_status === "created" || detail.ad_status === "failed" ? "" : " Activate becomes available once the ads are created."}</p>
+                {allowed.has("activate") && !confirmActivate && (
+                  <button type="button" className="primary-button" disabled={busy !== null} onClick={() => setConfirmActivate(true)}>Activate campaign…</button>)}
+                {confirmActivate && (
+                  <ActivateConfirm detail={detail} busy={busy === "activate"} onBack={() => setConfirmActivate(false)}
+                    onConfirm={() => { setConfirmActivate(false); void run("activate", () => activateExecution(id),
+                      "Activated. Ads start delivering after Meta reviews them, usually within a day."); }} />)}
+              </section>
+            )}
+            {ex.status === "ACTIVE" && (
+              <section className="go-live" aria-label="Live">
+                <p className="notice success-notice"><strong>Live.</strong> Spending up to {money(detail.config.daily_budget_minor)} a day once Meta has approved the ads.</p>
+                {allowed.has("pause") && <button type="button" className="secondary-button" disabled={busy !== null}
+                  onClick={() => { if (window.confirm("Pause this campaign in Meta? Delivery and spending stop.")) void run("pause", () => pauseExecution(id), "Paused in Meta. Nothing is delivering."); }}>
+                  {busy === "pause" ? "Pausing…" : "Pause campaign"}</button>}
+              </section>
             )}
 
             {editing ? (
@@ -366,6 +384,30 @@ function ActionBar(props: {
   );
 }
 
+function ActivateConfirm({ detail, busy, onBack, onConfirm }: { detail: ExecutionDetail; busy: boolean; onBack: () => void; onConfirm: () => void }) {
+  const [ack, setAck] = useState(false);
+  const c = detail.config;
+  const created = (detail.ads ?? []).filter((a) => a.status === "created").length || 1;
+  const failed = (detail.ads ?? []).filter((a) => a.status === "failed").length;
+  return (
+    <section className="publish-confirm" role="alertdialog" aria-labelledby="activate-confirm-title">
+      <h3 id="activate-confirm-title">Activate in Meta</h3>
+      <ul className="plain-list">
+        <li>Turns on {created === 1 ? "the ad" : `${created} ads`}, the ad set and the campaign in <strong>{c.ad_account_id}</strong>.</li>
+        <li>Spends up to <strong>{money(c.daily_budget_minor)}</strong> a day once Meta approves the ads (review usually takes up to 24 hours).</li>
+        {failed > 0 && <li>{failed === 1 ? "1 ad was" : `${failed} ads were`} not created and won't run. Retry them first if you want them included.</li>}
+        <li>You can pause it here at any time.</li>
+      </ul>
+      <label className="check-line"><input type="checkbox" checked={ack} onChange={(e) => setAck(e.target.checked)} />
+        I approve starting delivery and spending for this campaign.</label>
+      <div className="row-actions">
+        <button type="button" className="secondary-button" onClick={onBack}>Back</button>
+        <button type="button" className="primary-button" disabled={!ack || busy} onClick={onConfirm}>{busy ? "Activating…" : "Activate now"}</button>
+      </div>
+    </section>
+  );
+}
+
 function PublishConfirm({ detail, busy, onBack, onConfirm }: { detail: ExecutionDetail; busy: boolean; onBack: () => void; onConfirm: () => void }) {
   const [ack, setAck] = useState(false);
   const c = detail.config;
@@ -375,7 +417,7 @@ function PublishConfirm({ detail, busy, onBack, onConfirm }: { detail: Execution
       <ul className="plain-list">
         <li>Creates a campaign and ad set in <strong>{c.ad_account_id}</strong>, both <strong>paused</strong>.</li>
         <li>Daily budget <strong>{money(c.daily_budget_minor)}</strong> once someone activates it.</li>
-        <li>The ad itself is not created yet; add it in Ads Manager.</li>
+        <li>Campex then creates the ads from the approved creatives, also paused. You activate the campaign here when ready.</li>
         <li>If Meta does not answer, Campex checks before retrying. It never creates the campaign twice.</li>
       </ul>
       <label className="check-line"><input type="checkbox" checked={ack} onChange={(e) => setAck(e.target.checked)} />

@@ -342,6 +342,90 @@ public class CampaignExecutionService {
         return detail(id);
     }
 
+    /**
+     * Starts delivery from Campex, only after an explicit confirmation by a manager: the created ads, then the ad set,
+     * then the campaign are set ACTIVE (campaign last, so delivery starts only when everything below it is on).
+     * Setting a status is idempotent, so a partial failure is fixed by activating again; nothing is ever created here.
+     */
+    public ExecutionDetail activate(UUID id, boolean confirm) {
+        if (!confirm) {
+            throw new IllegalArgumentException("Confirm activation: the campaign starts delivering and spending immediately");
+        }
+        UUID clientId = clientOf(id);
+        Actor actor = access.require(clientId, Permission.MANAGE);
+        Row row = load(id);
+        requireStatus(row, Set.of("PUBLISHED_PAUSED"), "activated");
+        Map<String, Object> meta0 = jdbc.queryForMap("SELECT meta_adset_id, ad_status FROM campaign_executions WHERE id = ?", id);
+        if (AdCreationService.ACTIVE.contains(String.valueOf(meta0.get("ad_status")))) {
+            throw new ConflictException("The ads are still being created. Activate once they are ready.");
+        }
+        List<String> adIds = new ArrayList<>(jdbc.queryForList("SELECT meta_ad_id FROM campaign_execution_ads WHERE execution_id = ? "
+                + "AND status = 'created' AND meta_ad_id IS NOT NULL ORDER BY position", String.class, id));
+        if (adIds.isEmpty()) {
+            throw new ConflictException("No ad has been created in this campaign yet, so there is nothing to deliver. "
+                    + "Retry ad creation first.");
+        }
+        CampaignValidator.Context ctx = context(clientId);
+        if (ctx.dailySpendLimit() != null && row.config.dailyBudgetMinor() != null
+                && java.math.BigDecimal.valueOf(row.config.dailyBudgetMinor()).movePointLeft(2).compareTo(ctx.dailySpendLimit()) > 0) {
+            throw new ConflictException("The daily budget is above the client's daily spend limit; it cannot be activated.");
+        }
+        MetaAccess metaToken = requireMeta(clientId, actor, row.config.adAccountId());
+        String adsetId = (String) meta0.get("meta_adset_id");
+        try {
+            for (String adId : adIds) {
+                meta.applyChange(metaToken.token(), "ad", adId, "ACTIVE", null);
+            }
+            meta.applyChange(metaToken.token(), "adset", adsetId, "ACTIVE", null);
+            meta.applyChange(metaToken.token(), "campaign", row.metaCampaignId, "ACTIVE", null);
+        } catch (GatewayException e) {
+            tx.executeWithoutResult(s -> {
+                jdbc.update("UPDATE campaign_executions SET last_error = ?, updated_at = ? WHERE id = ?",
+                        "Activation did not finish: " + e.getMessage() + " Activate again; nothing new is created.", now(), id);
+                step(id, "activate", "failed", e.getMessage(), null, actor.email());
+            });
+            throw new ConflictException("Meta did not activate everything: " + e.getMessage() + " Try Activate again.");
+        }
+        tx.executeWithoutResult(s -> {
+            int n = jdbc.update("UPDATE campaign_executions SET status = 'ACTIVE', last_error = NULL, updated_by = ?, updated_at = ? "
+                    + "WHERE id = ? AND status = 'PUBLISHED_PAUSED'", actor.email(), now(), id);
+            if (n == 1) {
+                step(id, "activate", "ok", adIds.size() + (adIds.size() == 1 ? " ad" : " ads") + ", the ad set and the campaign set to ACTIVE.",
+                        Map.of("campaign_id", row.metaCampaignId, "adset_id", adsetId, "ad_ids", adIds), actor.email());
+                audit.record(clientId, actor.email(), ENTITY, id, "activated", Map.of("from", "PUBLISHED_PAUSED", "to", "ACTIVE",
+                        "ads", adIds.size()));
+                notifications.notifyClientManagers(clientId, actor.email(), "campaign_activated", "info", "Campaign activated: " + row.name,
+                        "Delivery starts after Meta reviews the ads. Spend runs up to the approved daily budget.", ENTITY, id);
+            }
+        });
+        refreshStatus(id, metaToken.token(), row.config.adAccountId(), row.metaCampaignId, actor);
+        return detail(id);
+    }
+
+    /** Stops delivery: pauses the campaign in Meta (ads and ad set keep their settings). */
+    public ExecutionDetail pause(UUID id) {
+        UUID clientId = clientOf(id);
+        Actor actor = access.require(clientId, Permission.MANAGE);
+        Row row = load(id);
+        requireStatus(row, Set.of("ACTIVE"), "paused");
+        MetaAccess metaToken = requireMeta(clientId, actor, row.config.adAccountId());
+        try {
+            meta.applyChange(metaToken.token(), "campaign", row.metaCampaignId, "PAUSED", null);
+        } catch (GatewayException e) {
+            throw new ConflictException("Meta did not pause the campaign: " + e.getMessage() + " Try again, or pause it in Ads Manager.");
+        }
+        tx.executeWithoutResult(s -> {
+            int n = jdbc.update("UPDATE campaign_executions SET status = 'PUBLISHED_PAUSED', updated_by = ?, updated_at = ? "
+                    + "WHERE id = ? AND status = 'ACTIVE'", actor.email(), now(), id);
+            if (n == 1) {
+                step(id, "pause", "ok", "Campaign paused in Meta.", Map.of("campaign_id", row.metaCampaignId), actor.email());
+                audit.record(clientId, actor.email(), ENTITY, id, "paused", Map.of("from", "ACTIVE", "to", "PUBLISHED_PAUSED"));
+            }
+        });
+        refreshStatus(id, metaToken.token(), row.config.adAccountId(), row.metaCampaignId, actor);
+        return detail(id);
+    }
+
     /** Looks the execution up in Meta: finds a campaign whose creation outcome was unknown, or refreshes status. */
     public ExecutionDetail reconcile(UUID id) {
         UUID clientId = clientOf(id);
@@ -479,7 +563,7 @@ public class CampaignExecutionService {
         notifications.notifyClientManagers(clientId, actor.email(),
                 complete ? "campaign_published" : "campaign_publish_failed", complete ? "info" : "critical",
                 (complete ? "Published (paused): " : "Partly published: ") + row.name,
-                complete ? "Campaign and ad set were created in Meta in PAUSED status. Review them in Ads Manager before activating."
+                complete ? "Campaign and ad set were created in Meta in PAUSED status. Campex is creating the ads; activate from Campaign approvals when ready."
                         : "The campaign exists in Meta but the ad set could not be created.",
                 ENTITY, id);
     }
@@ -640,8 +724,8 @@ public class CampaignExecutionService {
             return new ExecutionDetail(summary, read(rs.getString("config"), CampaignConfig.class), hash,
                     validation == null ? null : read(validation, ValidationReport.class), rs.getString("publish_tag"),
                     rs.getInt("publish_attempts"), rs.getString("meta_adset_id"), instant(rs, "meta_checked_at"),
-                    versions, approvals, steps, adActions(withRevise(allowedActions(status, rs.getString("meta_campaign_id") != null), status,
-                            rs.getString("meta_campaign_id") != null, rs.getString("publish_outcome")), rs.getString("ad_status")),
+                    versions, approvals, steps, adActions(withDelivery(id, status, withRevise(allowedActions(status, rs.getString("meta_campaign_id") != null), status,
+                            rs.getString("meta_campaign_id") != null, rs.getString("publish_outcome")), rs.getString("ad_status")), rs.getString("ad_status")),
                     rs.getString("ad_status"), rs.getString("ad_error"), rs.getString("meta_ad_id"), rs.getString("meta_video_id"),
                     rs.getString("meta_creative_id"), adsOf(id));
         }, id).stream().findFirst().orElseThrow(() -> new NotFoundException("Campaign execution not found"));
@@ -652,6 +736,18 @@ public class CampaignExecutionService {
                         + "WHERE execution_id = ? ORDER BY position",
                 (rs, i) -> new com.aivoice.lead.dto.CampaignExecutionDtos.AdDto(rs.getInt("position") + 1, rs.getString("creative_asset_id"),
                         rs.getInt("creative_version"), rs.getString("status"), rs.getString("error"), rs.getString("meta_ad_id")), id);
+    }
+
+    /** Activate needs a paused, published campaign with at least one created ad and no ad still being built. */
+    private List<String> withDelivery(UUID id, String status, List<String> actions, String adStatus) {
+        List<String> out = new ArrayList<>(actions);
+        if ("ACTIVE".equals(status)) out.add("pause");
+        if ("PUBLISHED_PAUSED".equals(status) && !AdCreationService.ACTIVE.contains(adStatus)) {
+            Integer created = jdbc.queryForObject("SELECT count(*) FROM campaign_execution_ads WHERE execution_id = ? AND status = 'created' "
+                    + "AND meta_ad_id IS NOT NULL", Integer.class, id);
+            if (created != null && created > 0) out.add("activate");
+        }
+        return out;
     }
 
     static List<String> withRevise(List<String> actions, String status, boolean hasMetaCampaign, String outcome) {

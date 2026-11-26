@@ -20,6 +20,9 @@ export const submitExecution = (id: string) => request<ExecutionDetail>(`${e(id)
 export const approveExecution = (id: string, note?: string) => request<ExecutionDetail>(`${e(id)}/approve`, post({ note }));
 export const rejectExecution = (id: string, note: string) => request<ExecutionDetail>(`${e(id)}/reject`, post({ note }));
 export const publishExecution = (id: string) => request<ExecutionDetail>(`${e(id)}/publish`, post({ confirm: true }));
+/** Starts delivery (ads, ad set, then campaign set ACTIVE). Spending starts once Meta approves the ads. */
+export const activateExecution = (id: string) => request<ExecutionDetail>(`${e(id)}/activate`, post({ confirm: true }));
+export const pauseExecution = (id: string) => request<ExecutionDetail>(`${e(id)}/pause`, post());
 export const reviseExecution = (id: string) => request<ExecutionDetail>(`${e(id)}/revise`, post());
 export const searchMetaLocations = (clientId: string, q: string) =>
   request<{ locations: MetaLocation[] }>(`/api/clients/${encodeURIComponent(clientId)}/meta/locations?q=${encodeURIComponent(q)}`);

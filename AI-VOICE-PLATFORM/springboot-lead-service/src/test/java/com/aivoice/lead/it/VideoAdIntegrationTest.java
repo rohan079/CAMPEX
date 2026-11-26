@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -287,6 +288,39 @@ class VideoAdIntegrationTest {
         verify(meta, times(1)).createAd(anyString(), anyString(), anyString(), eq("cr1"), anyString());
         verify(meta, times(2)).uploadImage(anyString(), anyString(), anyString(), any());
         verify(meta, times(2)).createCreative(anyString(), any());
+    }
+
+    @Test
+    void activationIsConfirmedAndTurnsOnAdsThenAdSetThenCampaign() throws Exception {
+        String video = approvedVideo();
+        String exec = publishedWith(video, 2, true);
+        when(meta.uploadImage(anyString(), anyString(), anyString(), any())).thenReturn("h1");
+        when(meta.uploadVideo(anyString(), anyString(), anyString(), any(Path.class), anyString())).thenReturn("v1");
+        when(meta.videoStatus("tok", "v1")).thenReturn("ready");
+        when(meta.createCreative(anyString(), any())).thenReturn("cr1");
+        when(meta.findAds(anyString(), anyString(), anyString())).thenReturn(List.of());
+        when(meta.createAd(anyString(), anyString(), anyString(), anyString(), anyString())).thenReturn("ad1");
+        JsonNode published = ok(as("m@v.test", post("/api/campaign-executions/" + exec + "/publish"), "{\"confirm\":true}"));
+        assertThat(published.get("allowed_actions").toString()).doesNotContain("activate");
+        JsonNode ready = ok(as("m@v.test", post("/api/campaign-executions/" + exec + "/ad/check"), null));
+        assertThat(ready.get("ad_status").asText()).isEqualTo("created");
+        assertThat(ready.get("allowed_actions").toString()).contains("activate");
+
+        as("m@v.test", post("/api/campaign-executions/" + exec + "/activate"), "{}").andExpect(status().isBadRequest());
+        verify(meta, never()).applyChange(anyString(), anyString(), anyString(), anyString(), any());
+
+        when(meta.applyChange(anyString(), anyString(), anyString(), anyString(), any())).thenReturn(Map.of("success", true));
+        JsonNode active = ok(as("m@v.test", post("/api/campaign-executions/" + exec + "/activate"), "{\"confirm\":true}"));
+        assertThat(active.at("/execution/status").asText()).isEqualTo("ACTIVE");
+        assertThat(active.get("allowed_actions").toString()).contains("pause").doesNotContain("activate");
+        org.mockito.InOrder order = org.mockito.Mockito.inOrder(meta);
+        order.verify(meta).applyChange("tok", "ad", "ad1", "ACTIVE", null);
+        order.verify(meta).applyChange(eq("tok"), eq("adset"), anyString(), eq("ACTIVE"), isNull());
+        order.verify(meta).applyChange(eq("tok"), eq("campaign"), anyString(), eq("ACTIVE"), isNull());
+
+        JsonNode paused = ok(as("m@v.test", post("/api/campaign-executions/" + exec + "/pause"), null));
+        assertThat(paused.at("/execution/status").asText()).isEqualTo("PUBLISHED_PAUSED");
+        verify(meta).applyChange(eq("tok"), eq("campaign"), anyString(), eq("PAUSED"), isNull());
     }
 
     @Test

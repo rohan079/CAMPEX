@@ -490,6 +490,24 @@ delivers more of the best performer.
 - **Studio and approvals.** On Studio's Ad step, "More ads in this ad set" adds or removes approved creatives. Campaign
   approvals lists each ad with its own status.
 
+## 6h. Activating from Campex
+
+Publishing still creates everything **paused**. Once the ads exist, a manager can start delivery from Campaign approvals
+without opening Ads Manager:
+
+- `POST /api/campaign-executions/{id}/activate` needs MANAGE and `{"confirm": true}`. The UI asks the manager to tick
+  "I approve starting delivery and spending" first.
+- **Allowed only when** the campaign is `PUBLISHED_PAUSED`, no ad is still being built, and at least one ad was created.
+  The daily budget must still be within the client's daily spend limit.
+- **Order.** The created ads, then the ad set, then the campaign are set `ACTIVE`; the campaign goes last, so delivery
+  starts only when everything below it is on. Setting a status is idempotent, so if Meta stops partway the manager
+  activates again. Nothing is ever created by this call.
+- **Result.** The campaign moves to `ACTIVE`, with a step, an audit entry and a notification. Meta still reviews the ads
+  before they deliver.
+- `POST /api/campaign-executions/{id}/pause` (MANAGE) pauses the campaign in Meta and moves it back to
+  `PUBLISHED_PAUSED`.
+- Migration V23 adds the `activate` and `pause` step names.
+
 ## 7. Roles and permissions
 
 Spec roles map onto the existing per-client roles (no schema change needed yet):

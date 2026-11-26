@@ -311,7 +311,7 @@ public class AdCreationService {
         if ("created".equals(summary) && !"created".equals(was)) {
             notifications.notifyClientManagers(clientId, null, "campaign_ad_created", "info",
                     (ads.size() == 1 ? "Ad created (paused): " : created + " ads created (paused): ") + name,
-                    "The ads are in Meta, paused. Review them in Ads Manager before activating.", "campaign_execution", executionId);
+                    "The ads are in Meta, paused. Activate the campaign from Campaign approvals when you are ready.", "campaign_execution", executionId);
         } else if ("failed".equals(summary) && !"failed".equals(was)) {
             notifications.notifyClientManagers(clientId, null, "campaign_ad_failed", "warning",
                     created > 0 ? created + " of " + ads.size() + " ads created: " + name : "Ad not created",

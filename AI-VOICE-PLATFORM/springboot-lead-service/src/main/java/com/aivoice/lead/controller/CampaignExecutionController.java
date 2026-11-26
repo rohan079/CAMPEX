@@ -82,6 +82,17 @@ public class CampaignExecutionController {
         return executions.publish(execution(id), body != null && body.confirm());
     }
 
+    /** Starts delivery. Requires {"confirm": true}: spending starts as soon as Meta approves the ads. */
+    @PostMapping("/api/campaign-executions/{id}/activate")
+    public ExecutionDetail activate(@PathVariable String id, @RequestBody(required = false) PublishRequest body) {
+        return executions.activate(execution(id), body != null && body.confirm());
+    }
+
+    @PostMapping("/api/campaign-executions/{id}/pause")
+    public ExecutionDetail pause(@PathVariable String id) {
+        return executions.pause(execution(id));
+    }
+
     @PostMapping("/api/campaign-executions/{id}/retry")
     public ExecutionDetail retry(@PathVariable String id) {
         return executions.retry(execution(id));

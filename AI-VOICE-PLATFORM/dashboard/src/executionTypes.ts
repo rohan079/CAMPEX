@@ -4,7 +4,7 @@ export type ExecutionStatus = "DRAFT" | "READY_FOR_REVIEW" | "PENDING_APPROVAL" 
   | "PUBLISHED_PAUSED" | "ACTIVE" | "FAILED" | "CANCELLED";
 
 export type ExecutionAction = "edit" | "validate" | "submit" | "approve" | "reject" | "publish" | "retry"
-  | "reconcile" | "cancel" | "revise" | "ad_retry" | "ad_check";
+  | "reconcile" | "cancel" | "revise" | "ad_retry" | "ad_check" | "activate" | "pause";
 
 /** A place from Meta's location search. */
 export interface MetaLocation {

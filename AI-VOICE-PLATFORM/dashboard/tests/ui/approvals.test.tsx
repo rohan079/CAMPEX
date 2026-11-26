@@ -9,7 +9,7 @@ vi.mock("../../src/executionApi", () => ({
   listExecutions: vi.fn(), createExecution: vi.fn(), getExecution: vi.fn(), updateExecution: vi.fn(),
   validateExecution: vi.fn(), submitExecution: vi.fn(), approveExecution: vi.fn(), rejectExecution: vi.fn(),
   publishExecution: vi.fn(), retryExecution: vi.fn(), reconcileExecution: vi.fn(), cancelExecution: vi.fn(), retryAd: vi.fn(), checkAd: vi.fn(),
-  reviseExecution: vi.fn(), searchMetaLocations: vi.fn(),
+  reviseExecution: vi.fn(), searchMetaLocations: vi.fn(), activateExecution: vi.fn(), pauseExecution: vi.fn(),
   listNotifications: vi.fn(), markNotificationRead: vi.fn(), markAllNotificationsRead: vi.fn(),
 }));
 vi.mock("../../src/creativeApi", () => ({ listCreatives: vi.fn(async () => []), getCreative: vi.fn() }));
@@ -126,6 +126,26 @@ describe("Ad creation status", () => {
 });
 
 describe("Notification bell", () => {
+  it("activates a paused campaign only after explicit confirmation, and can pause it again", async () => {
+    m.getExecution.mockResolvedValue({ ...detail("PUBLISHED_PAUSED", ["reconcile", "activate"]), ad_status: "created",
+      ads: [{ position: 1, creative_asset_id: "cr1", creative_version: 2, status: "created", error: null, meta_ad_id: "9001" }] });
+    m.activateExecution.mockResolvedValue({ ...detail("ACTIVE", ["reconcile", "pause"]), ad_status: "created" });
+    m.pauseExecution.mockResolvedValue(detail("PUBLISHED_PAUSED", ["reconcile", "activate"]));
+    render(<CampaignApprovalsPage clientId="c1" focusId="e1" />);
+    const dialog = await screen.findByRole("dialog", { name: "Green Villas launch" });
+    fireEvent.click(await within(dialog).findByRole("button", { name: "Activate campaign…" }));
+    const confirm = within(dialog).getByRole("alertdialog", { name: "Activate in Meta" });
+    const go = within(confirm).getByRole("button", { name: "Activate now" }) as HTMLButtonElement;
+    expect(go.disabled).toBe(true);
+    fireEvent.click(within(confirm).getByRole("checkbox"));
+    fireEvent.click(go);
+    await waitFor(() => expect(m.activateExecution).toHaveBeenCalledWith("e1"));
+    expect(await within(dialog).findByText("Live.")).toBeTruthy();
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Pause campaign" }));
+    await waitFor(() => expect(m.pauseExecution).toHaveBeenCalledWith("e1"));
+  });
+
   it("lists each ad in the ad set with its own status", async () => {
     m.getExecution.mockResolvedValue({ ...detail("PUBLISHED_PAUSED", ["reconcile", "ad_retry"]), ad_status: "failed", ad_error: "Ad 2: Meta rejected it",
       ads: [{ position: 1, creative_asset_id: "cr1", creative_version: 2, status: "created", error: null, meta_ad_id: "9001" },

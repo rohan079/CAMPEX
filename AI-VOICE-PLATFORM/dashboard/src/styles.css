@@ -1901,3 +1901,6 @@ video.ad-preview-image, video.mock-image { background: #000; object-fit: contain
 .extra-ad-text small { color: var(--text-2); }
 .ad-status-list { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 6px; }
 .ad-status-list li > span:first-child { font-size: .8rem; color: var(--text-2); margin-right: 4px; }
+
+.go-live { display: grid; gap: 8px; justify-items: start; }
+.go-live .notice { width: 100%; margin: 0; }
