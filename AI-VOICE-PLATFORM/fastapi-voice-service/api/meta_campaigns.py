@@ -89,6 +89,8 @@ async def publish_paused_campaign(
             "confirmed": body.confirmed,
             "access_token": access_token,
         }
+        if body.page_id:
+            arguments["page_id"] = body.page_id
         if body.geo_key and body.geo_type:
             # An exact place picked from Meta's location search; skips matching the text again.
             arguments["geo_key"] = body.geo_key

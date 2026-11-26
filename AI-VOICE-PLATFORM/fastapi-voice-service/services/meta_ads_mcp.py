@@ -70,9 +70,13 @@ class MetaAdsGraphApi:
                 raise MetaAdsToolError("Meta access was revoked or expired. Reconnect the Meta account.")
             if response.status_code == 429 or graph_code in {4, 17, 32, 613}:
                 raise MetaAdsToolError("Meta rate limit reached. Retry later.")
+            subcode = error.get("error_subcode")
+            logger.warning("Meta Graph rejection detail: subcode %s", subcode)
+            reason = _meta_reason(error, token)
             raise MetaAdsToolError(
-                f"Meta rejected the request (HTTP {response.status_code}, code {graph_code}). "
-                "Check the account permissions and request parameters."
+                f"Meta rejected the request (HTTP {response.status_code}, code {graph_code}"
+                + (f", subcode {subcode}" if subcode else "") + ")"
+                + (f": {reason}" if reason else ". Check the account permissions and request parameters.")
             )
         return payload
 
@@ -157,6 +161,21 @@ class MetaAdsGraphApi:
 
 
 LOCATION_TYPES = ("city", "region", "country")
+_SECRETISH = re.compile(r"(access_token=)?EAA[A-Za-z0-9]{20,}|access_token=[^&\s]+")
+
+
+def _meta_reason(error: dict[str, Any], token: str) -> str:
+    """Meta's own explanation (user-facing title/message first), with anything token-like removed."""
+    parts: list[str] = []
+    for field in ("error_user_title", "error_user_msg", "message"):
+        text = str(error.get(field) or "").strip()
+        if text and not any(text in p or p in text for p in parts):
+            parts.append(text)
+    reason = " — ".join(parts)
+    if token:
+        reason = reason.replace(token, "[redacted]")
+    reason = _SECRETISH.sub("[redacted]", reason)
+    return reason[:400]
 
 
 def location_label(row: dict[str, Any]) -> str:
@@ -775,6 +794,7 @@ def create_meta_ads_mcp(
         daily_budget_minor: int = 50000,
         geo_key: str | None = None,
         geo_type: Literal["city", "region", "country"] | None = None,
+        page_id: str | None = None,
     ) -> dict[str, Any]:
         """Create a PAUSED Meta campaign and ad set; create a paused link ad when a Page is selected.
 
@@ -786,6 +806,13 @@ def create_meta_ads_mcp(
             raise MetaAdsToolError("Daily budget must be at least 100 minor currency units.")
         if age_min < 18 or age_max > 65 or age_max < age_min:
             raise MetaAdsToolError("Age range must be between 18 and 65, with maximum age not below minimum age.")
+        # Checked before anything is created, so a missing prerequisite never leaves a half-built campaign.
+        if objective == "sales":
+            raise MetaAdsToolError("Sales campaigns need a Meta Pixel conversion event, which Campex does not set up yet. "
+                                   "Use the Leads or Traffic objective.")
+        page = (page_id or "").strip()
+        if objective == "leads" and not page:
+            raise MetaAdsToolError("Leads campaigns need a Facebook Page. Select the Page the ads run as.")
         account = graph.account_id(ad_account_id)
 
         # Verify the account belongs to the token before mutating anything.
@@ -807,6 +834,8 @@ def create_meta_ads_mcp(
             "age_max": age_max,
             "geo_locations": geo_locations,
             "publisher_platforms": publisher_platforms,
+            # Meta requires an explicit choice; 0 keeps the age and location limits the user chose.
+            "targeting_automation": {"advantage_audience": 0},
         }
         if "facebook" in publisher_platforms:
             targeting["facebook_positions"] = ["feed", "story"]
@@ -827,6 +856,8 @@ def create_meta_ads_mcp(
                 "objective": meta_objective,
                 "status": "PAUSED",
                 "special_ad_categories": "[]",
+                # Budget is set on the ad set (not the campaign); Meta requires this choice to be explicit.
+                "is_adset_budget_sharing_enabled": "false",
             },
         )
         campaign_id = str(campaign.get("id", ""))
@@ -839,20 +870,20 @@ def create_meta_ads_mcp(
             "sales": "OFFSITE_CONVERSIONS",
             "awareness": "REACH",
         }
+        ad_set_form = {
+            "name": f"{name.strip()} - audience",
+            "campaign_id": campaign_id,
+            "daily_budget": str(daily_budget_minor),
+            "billing_event": "IMPRESSIONS",
+            "optimization_goal": optimization_goals[objective],
+            "bid_strategy": "LOWEST_COST_WITHOUT_CAP",
+            "targeting": json.dumps(targeting),
+            "status": "PAUSED",
+        }
+        if objective == "leads":
+            ad_set_form["promoted_object"] = json.dumps({"page_id": page})
         try:
-            ad_set = await graph.request(
-                "POST", f"{account}/adsets", access_token,
-                form={
-                    "name": f"{name.strip()} - audience",
-                    "campaign_id": campaign_id,
-                    "daily_budget": str(daily_budget_minor),
-                    "billing_event": "IMPRESSIONS",
-                    "optimization_goal": optimization_goals[objective],
-                    "bid_strategy": "LOWEST_COST_WITHOUT_CAP",
-                    "targeting": json.dumps(targeting),
-                    "status": "PAUSED",
-                },
-            )
+            ad_set = await graph.request("POST", f"{account}/adsets", access_token, form=ad_set_form)
         except MetaAdsToolError as exc:
             return {
                 "campaign_id": campaign_id,

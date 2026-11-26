@@ -17,7 +17,7 @@ class CampaignValidatorTest {
     static CampaignConfig valid() {
         return new CampaignConfig("act_123456", "Green Villas launch", "leads", List.of("facebook", "instagram"),
                 "Guntur", 25, 55, 50_000L, "Villas near Guntur", "Book a site visit this weekend.", null,
-                "LEARN_MORE", "https://greenvillas.example.com/launch", null, null, null, null, null);
+                "LEARN_MORE", "https://greenvillas.example.com/launch", "42", null, null, null, null);
     }
 
     private static List<String> errorFields(ValidationReport report) {
@@ -76,7 +76,7 @@ class CampaignValidatorTest {
         ValidationReport report = CampaignValidator.validate(new CampaignConfig(c.adAccountId(), c.name(), c.objective(),
                 c.platforms(), c.location(), c.ageMin(), c.ageMax(), c.dailyBudgetMinor(),
                 "A headline that is clearly longer than forty chars", "x".repeat(300), null, c.cta(),
-                c.destinationUrl(), null, null, null, null, null), CTX);
+                c.destinationUrl(), c.pageId(), null, null, null, null), CTX);
         assertThat(report.valid()).isTrue();
         assertThat(report.warnings()).extracting(ValidationIssue::field).contains("headline", "primary_text");
     }
@@ -86,7 +86,7 @@ class CampaignValidatorTest {
         CampaignConfig c = valid();
         java.util.function.BiFunction<String, Integer, CampaignConfig> with = (id, v) -> new CampaignConfig(c.adAccountId(),
                 c.name(), c.objective(), c.platforms(), c.location(), c.ageMin(), c.ageMax(), c.dailyBudgetMinor(),
-                c.headline(), c.primaryText(), null, c.cta(), c.destinationUrl(), null, id, v, null, null);
+                c.headline(), c.primaryText(), null, c.cta(), c.destinationUrl(), c.pageId(), id, v, null, null);
         var approved = java.util.Map.of("cr1", new CampaignValidator.ApprovedCreative(3, c.headline(), c.primaryText()),
                 "cr2", new CampaignValidator.ApprovedCreative(1, "Other headline", c.primaryText()));
         var ctx = new CampaignValidator.Context(Set.of("act_123456"), null, approved);
@@ -95,5 +95,16 @@ class CampaignValidatorTest {
         assertThat(CampaignValidator.validate(with.apply("cr2", 1), ctx).errors()).extracting(ValidationIssue::code).contains("copy_changed");
         assertThat(CampaignValidator.validate(with.apply("nope", 1), ctx).errors()).extracting(ValidationIssue::code).contains("not_approved");
         assertThat(CampaignValidator.validate(c, ctx).warnings()).extracting(ValidationIssue::code).contains("none");
+    }
+
+    @Test
+    void salesIsBlockedAndLeadsNeedAPage() {
+        CampaignConfig c = valid();
+        java.util.function.BiFunction<String, String, CampaignConfig> with = (objective, page) -> new CampaignConfig(
+                c.adAccountId(), c.name(), objective, c.platforms(), c.location(), c.ageMin(), c.ageMax(), c.dailyBudgetMinor(),
+                c.headline(), c.primaryText(), null, c.cta(), c.destinationUrl(), page, null, null, null, null);
+        assertThat(CampaignValidator.validate(with.apply("sales", "42"), CTX).errors()).extracting(ValidationIssue::code).contains("needs_pixel");
+        assertThat(CampaignValidator.validate(with.apply("leads", null), CTX).errors()).extracting(ValidationIssue::field).contains("page_id");
+        assertThat(CampaignValidator.validate(with.apply("traffic", null), CTX).valid()).isTrue();
     }
 }

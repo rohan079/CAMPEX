@@ -81,6 +81,7 @@ async def test_campaign_creation_is_paused_and_checks_account_ownership():
             "daily_budget_minor": 50000,
             "confirmed": True,
             "access_token": "sensitive-token",
+            "page_id": "777",
         })
 
     data = tool_payload(result)
@@ -112,6 +113,7 @@ async def test_mcp_does_not_create_campaign_for_an_unowned_account():
                 "daily_budget_minor": 50000,
                 "confirmed": True,
                 "access_token": "sensitive-token",
+                "page_id": "777",
             })
 
     assert calls == ["/v27.0/me/adaccounts"]
@@ -286,7 +288,7 @@ def _campaign_args(**overrides):
     args = {
         "ad_account_id": "act_123", "name": "Spring homes", "objective": "leads", "location": "Vijayawada",
         "age_min": 18, "age_max": 65, "platforms": ["facebook"], "daily_budget_minor": 50000,
-        "confirmed": True, "access_token": "sensitive-token",
+        "confirmed": True, "access_token": "sensitive-token", "page_id": "777",
     }
     args.update(overrides)
     return args
@@ -301,9 +303,11 @@ def _location_handler(search_rows, seen):
             seen.setdefault("queries", []).append(q)
             return httpx.Response(200, json={"data": search_rows(q)})
         if request.url.path.endswith("/act_123/campaigns"):
+            seen["campaign"] = dict(httpx.QueryParams(request.content.decode()))
             return httpx.Response(200, json={"id": "campaign-1"})
         if request.url.path.endswith("/act_123/adsets"):
-            seen["targeting"] = json.loads(dict(httpx.QueryParams(request.content.decode()))["targeting"])
+            seen["adset"] = dict(httpx.QueryParams(request.content.decode()))
+            seen["targeting"] = json.loads(seen["adset"]["targeting"])
             return httpx.Response(200, json={"id": "adset-1"})
         raise AssertionError(f"Unexpected Graph request path: {request.url.path}")
     return handler
@@ -339,3 +343,56 @@ async def test_exact_geo_key_skips_search_and_ambiguity_lists_options():
         found = await client.call_tool("search_ad_locations", {"query": "Gun", "access_token": "sensitive-token"})
     labels = [row["label"] for row in tool_payload(found)]
     assert labels == ["Guntur, Andhra Pradesh, India", "Guntur, Elsewhere, India"]
+
+
+
+@pytest.mark.asyncio
+async def test_campaign_sends_meta_required_fields_and_lead_page():
+    seen: dict = {}
+    server = create_meta_ads_mcp(Settings(meta_graph_api_version="v27.0"),
+                                 httpx.MockTransport(_location_handler(lambda q: [GUNTUR], seen)))
+    async with Client(server) as client:
+        await client.call_tool("create_paused_campaign", _campaign_args(location="Guntur"))
+    assert seen["campaign"]["is_adset_budget_sharing_enabled"] == "false"
+    assert seen["campaign"]["status"] == "PAUSED"
+    assert seen["targeting"]["targeting_automation"] == {"advantage_audience": 0}
+    assert json.loads(seen["adset"]["promoted_object"]) == {"page_id": "777"}
+
+
+@pytest.mark.asyncio
+async def test_missing_prerequisites_fail_before_any_meta_call():
+    calls: list = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request.url.path)
+        return httpx.Response(200, json={"data": []})
+
+    server = create_meta_ads_mcp(Settings(meta_graph_api_version="v27.0"), httpx.MockTransport(handler))
+    async with Client(server) as client:
+        with pytest.raises(ToolError, match="need a Facebook Page"):
+            await client.call_tool("create_paused_campaign", _campaign_args(page_id=None))
+        with pytest.raises(ToolError, match="Meta Pixel"):
+            await client.call_tool("create_paused_campaign", _campaign_args(objective="sales"))
+    assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_meta_rejection_shows_metas_reason_without_the_token():
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/me/adaccounts"):
+            return httpx.Response(200, json={"data": [{"id": "act_123"}]})
+        if request.url.path.endswith("/search"):
+            return httpx.Response(200, json={"data": [GUNTUR]})
+        return httpx.Response(400, json={"error": {
+            "code": 100, "error_subcode": 4834011, "message": "Invalid parameter",
+            "error_user_title": "Budget sharing choice required",
+            "error_user_msg": "Choose whether ad sets share budget. Token sensitive-token EAABsecretsecretsecretsecret1234",
+        }})
+
+    server = create_meta_ads_mcp(Settings(meta_graph_api_version="v27.0"), httpx.MockTransport(handler))
+    async with Client(server) as client:
+        with pytest.raises(ToolError) as info:
+            await client.call_tool("create_paused_campaign", _campaign_args(location="Guntur"))
+    text = str(info.value)
+    assert "subcode 4834011" in text and "Budget sharing choice required" in text
+    assert "sensitive-token" not in text and "EAABsecret" not in text

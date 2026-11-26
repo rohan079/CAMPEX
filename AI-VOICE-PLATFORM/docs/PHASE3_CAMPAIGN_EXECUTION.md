@@ -458,6 +458,17 @@ fail with "Meta could not match the target location".
   approvals are invalidated, so the fixed campaign is validated, submitted and approved again. The approvals page
   shows this as "Edit and resubmit".
 
+### Meta request requirements and error detail
+
+- Campaigns are created with `is_adset_budget_sharing_enabled=false` (the budget lives on the ad set), and ad set
+  targeting sends `targeting_automation.advantage_audience=0`, so Meta keeps the chosen age and location limits.
+  Meta rejects requests where these choices are left unset.
+- Leads ad sets send `promoted_object.page_id`, so a Leads campaign needs a Facebook Page. Sales needs a Meta Pixel
+  conversion event, which Campex does not configure yet, so validation blocks it. Both are checked before any Meta
+  call, so they can never leave a half-built campaign.
+- When Meta rejects a request, the error now includes Meta's subcode and its own explanation (`error_user_title`,
+  `error_user_msg`, `message`), with anything that looks like a token removed.
+
 ## 7. Roles and permissions
 
 Spec roles map onto the existing per-client roles (no schema change needed yet):

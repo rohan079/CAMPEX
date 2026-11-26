@@ -116,7 +116,7 @@ class CampaignExecutionIntegrationTest {
         return "{\"ad_account_id\":\"" + ACCOUNT + "\",\"name\":\"" + name + "\",\"objective\":\"leads\","
                 + "\"platforms\":[\"facebook\"],\"location\":\"Guntur\",\"age_min\":25,\"age_max\":55,"
                 + "\"daily_budget_minor\":" + budget + ",\"headline\":\"Villas near Guntur\","
-                + "\"primary_text\":\"Book a site visit.\",\"cta\":\"LEARN_MORE\"}";
+                + "\"primary_text\":\"Book a site visit.\",\"cta\":\"LEARN_MORE\",\"page_id\":\"42\"}";
     }
 
     private ResultActions as(String email, MockHttpServletRequestBuilder req, String body) throws Exception {
